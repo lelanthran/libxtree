@@ -9,7 +9,8 @@ static int basic_test (void)
 {
   int ret = EXIT_FAILURE;
 
-  xtree_node_t *rootnode = xtree_node_new (NULL, "root", xtree_node_type_ATOM);
+  xtree_node_t *rootnode = xtree_node_new (NULL, xtree_node_type_LIST);
+  xtree_node_t *tmpnode = NULL;
 
   if (!rootnode) {
     XTREE_ERROR ("Failed to create root node\n");
@@ -32,9 +33,37 @@ static int basic_test (void)
     goto cleanup;
   }
 
+  for (size_t i=0; i<4; i++) {
+    char nname[20];
+    char nvalue[20];
+    snprintf (nname, sizeof nname, "name-%zu", i);
+    snprintf (nvalue, sizeof nvalue, "value-%zu", i);
+    enum xtree_node_type_t type =
+      (!(i % 2))
+        ? xtree_node_type_ATOM
+        : xtree_node_type_LIST;
+
+    printf ("type: %i\n", type);
+    if (!(tmpnode = xtree_node_new (rootnode, type))) {
+      XTREE_ERROR ("Failed to create childnode %zu\n", i);
+      goto cleanup;
+    }
+    const char *set = NULL;
+    switch (type) {
+      case xtree_node_type_ATOM:
+        set = xtree_node_value_set (tmpnode, nvalue);
+        break;
+      case xtree_node_type_LIST:
+        set = xtree_node_attr_new (tmpnode, "_tag",  nname);
+        break;
+    }
+    printf ("set: [%s]\n", set);
+  }
+
   xtree_node_dump (rootnode, NULL, 1);
   ret = EXIT_SUCCESS;
 cleanup:
+  xtree_node_free (&tmpnode);
   xtree_node_free (&rootnode);
   return ret;
 }

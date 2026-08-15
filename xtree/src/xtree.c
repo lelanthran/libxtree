@@ -119,34 +119,56 @@ static xtree_kv_t *xtree_kvlist_find (ds_array_t *kvlist, const char *name)
 
 
 
+union atom_t {
+  char *_value;           // Name of this node
+  ds_array_t *_children;  // xtree_node_t pointers
+};
 
 struct xtree_node_t {
   enum xtree_node_type_t type;  // Type of this node (doesn't really make a difference
 
   xtree_node_t *parent;         // Parent node, or NULL if no parent
 
-  char *name;                   // Name of this node
-
   ds_array_t *attrs;            // xtree_kv_t pointers
 
-  ds_array_t *children;         // xtree_node_t pointers
+  union atom_t atom;
 };
 
 
 
-xtree_node_t *xtree_node_new (xtree_node_t *parent, const char *name, enum xtree_node_type_t type)
+xtree_node_t *xtree_node_new (xtree_node_t *parent, enum xtree_node_type_t type)
 {
   bool error = true;
   xtree_node_t *ret = calloc (1, sizeof *ret);
 
   if (!ret ||
-      !(ret->name = ds_str_dup (name)) ||
-      !(ret->attrs = ds_array_new ()) ||
-      !(ret->children = ds_array_new ()))
+      !(ret->attrs = ds_array_new ()))
     goto cleanup;
 
   ret->type = type;
   ret->parent = parent;
+
+  switch (type) {
+    case xtree_node_type_ATOM:
+      if (!(ret->atom._value = ds_str_dup ("")))
+        goto cleanup;
+      break;
+
+    case xtree_node_type_LIST:
+      if (!(ret->atom._children = ds_array_new ()))
+        goto cleanup;
+      break;
+
+    default:
+      goto cleanup;
+  }
+
+  if (parent) {
+    if (parent->type != xtree_node_type_LIST)
+      goto cleanup;
+    if (!(ds_array_ins_tail (parent->atom._children, ret)))
+      goto cleanup;
+  }
 
   error = false;
 cleanup:
@@ -168,19 +190,30 @@ void xtree_node_free (xtree_node_t **node)
   ds_array_iterate (n->attrs, xtree_kv_free_wrap, NULL);
   ds_array_del (n->attrs);
 
-  size_t nchildren = ds_array_length (n->children);
-  for (size_t i=nchildren + 1; i > 0; i--) {
-    xtree_node_t *child = ds_array_get (n->children, i-1);
-    xtree_node_free (&child);
-  }
-  ds_array_del (n->children);
+  size_t nchildren = 0;
 
+  switch (n->type) {
+    case xtree_node_type_ATOM:
+      free (n->atom._value);
+      break;
+
+    case xtree_node_type_LIST:
+      nchildren = ds_array_length (n->atom._children);
+      for (size_t i=nchildren + 1; i > 0; i--) {
+        xtree_node_t *child = ds_array_get (n->atom._children, i-1);
+        xtree_node_free (&child);
+      }
+      ds_array_del (n->atom._children);
+      break;
+
+    default:
+      break;
+  }
 
   // Remove current node from parent->children array
   if (parent)
-    ds_array_rm_ptr (parent->children, n);
+    ds_array_rm_ptr (parent->atom._children, n);
 
-  free (n->name);
   free (n);
   *node = NULL;
 }
@@ -197,34 +230,62 @@ void xtree_node_dump (const xtree_node_t *node, FILE *outf, size_t depth)
 #define INDENT    for (size_t i=0; i<depth; i++) fprintf (outf, " ")
 
   INDENT;
-  fprintf (outf, "node:name     [%s]\n", node->name);
+  fprintf (outf, "node:%p\n", node);
   INDENT;
-  fprintf (outf, "node:parent   [%s]\n", node->parent ? node->parent->name : "NULL");
+  fprintf (outf, "node:type     [%i]\n", node->type);
+  INDENT;
+  fprintf (outf, "node:parent   [%p]\n", node->parent);
   INDENT;
   fprintf (outf, "node:nattrs     %zu\n", ds_array_length (node->attrs));
-  INDENT;
-  fprintf (outf, "node:nchildren  %zu\n", ds_array_length (node->children));
-
   size_t nitems = ds_array_length (node->attrs);
   for (size_t i=0; i<nitems; i++) {
     xtree_kv_t *kv = ds_array_get (node->attrs, i);
     INDENT;
-    fprintf (outf, "node:%s:attr  [%s:%s]\n",
-             node->name, kv->name, kv->value);
+    fprintf (outf, "node:%p:attr  [%s:%s]\n",
+             node, kv->name, kv->value);
   }
 
-  nitems = ds_array_length (node->children);
+  INDENT;
 
-  for (size_t i=0; i<nitems; i++) {
-    xtree_node_t *child = ds_array_get (node->children, i);
-    xtree_node_dump (child, outf, (depth + 1));
+  switch (node->type) {
+    case xtree_node_type_ATOM:
+      fprintf (outf, "node:value  [%s]\n", node->atom._value);
+      break;
+
+    case xtree_node_type_LIST:
+      fprintf (outf, "node:nchildren  %zu\n", ds_array_length (node->atom._children));
+      nitems = ds_array_length (node->atom._children);
+
+      for (size_t i=0; i<nitems; i++) {
+        xtree_node_t *child = ds_array_get (node->atom._children, i);
+        xtree_node_dump (child, outf, (depth + 1));
+      }
+      break;
   }
 
 #undef INDENT
 }
 
+const char *xtree_node_value_set (xtree_node_t *node, const char *value)
+{
+  if (!node)
+    return false;
+  return str_replace (&node->atom._value, value);
+}
 
-bool xtree_node_attr_new (xtree_node_t *node, const char *name, const char *value)
+const char *xtree_node_value_get (xtree_node_t *node)
+{
+  if (!node || node->type != xtree_node_type_ATOM)
+    return NULL;
+
+  return node->atom._value;
+}
+
+
+
+
+
+const char *xtree_node_attr_new (xtree_node_t *node, const char *name, const char *value)
 {
   bool error = true;
   xtree_kv_t *tmp = xtree_kv_new (name, value);
@@ -234,14 +295,12 @@ bool xtree_node_attr_new (xtree_node_t *node, const char *name, const char *valu
   if (!(ds_array_ins_tail (node->attrs, tmp)))
     goto cleanup;
 
-  tmp = NULL;
-
   error = false;
 cleanup:
   if (error)
     xtree_kv_free (&tmp);
 
-  return !error;
+  return (!error) ? tmp->value : NULL;
 }
 
 
