@@ -2,7 +2,6 @@
 #ifndef H_XTREE
 #define H_XTREE
 
-
 /* ***************************************************************************
  * An xtree is a generic tree suitable for storing XML, HTML or similar trees.
  * It can also store JSON trees, s-expressions, etc. It is intended to be an
@@ -14,10 +13,11 @@
  * format.
  *
  * The general form is:
- * Each node stores a list of one or more atoms, in addition to a pointer to a
- * parent node and an ordered list (array) of children nodes. While this general
- * structure can represent everything, for convenience each node also stores a
- * name and a set of KV attributes (both plain text).
+ * Each node stores an atom, a type, a name and a pointer to a parent node.
+ * While this general structure can represent everything, for convenience each
+ * node also stores a name and a set of KV attributes (both plain text). An atom
+ * is either of type ATOM (stores a value) or of type LIST (stores a list of
+ * atoms).
  *
  * A general tree such as this is applicable to a really large variety of
  * uses:
@@ -52,7 +52,8 @@ const char *xtree_node_type_string (enum xtree_node_type_t type);
 // Create a new node using the specified node as a parent. If no parent is
 // specified then the returned node is a root node. On error NULL is returned
 // and extended error information is stored in the mandatory `err` parameter.
-// Only allowable types are `_ATOM` and `_LIST`.
+// Only allowable types are `_ATOM` and `_LIST`; other types result in an
+// error. The parent must be of type _LIST.
 xtree_node_t *xtree_node_new (struct xtree_errobj_t *err,
                               xtree_node_t *parent,
                               const char *optional_name,
@@ -60,7 +61,8 @@ xtree_node_t *xtree_node_new (struct xtree_errobj_t *err,
 
 // Free the specified node, removing it from any parent if necessary. Also
 // sets the pointer to NULL so callers can call this multiple times with the
-// same variable. Parameter `node` itself can be NULL, too.
+// same variable. Parameter `node` itself can be NULL, too. Children are
+// recursively freed as well.
 void xtree_node_free (xtree_node_t **node);
 
 // Dump the node recursively. Used only during testing. If `outf` is NULL,
@@ -81,7 +83,7 @@ enum xtree_node_type_t xtree_node_type_get (const xtree_node_t *node);
 
 // Return the parent of the node (which is NULL in the event of the node being
 // a root node), or NULL on error. Extended error information is available in
-// the mandatory parameter `err`.
+// the mandatory parameter `err` on error only.
 xtree_node_t *xtree_node_parent (struct xtree_errobj_t *err,
                                  const xtree_node_t *node);
 
@@ -126,7 +128,6 @@ xtree_node_t *xtree_node_child_get (struct xtree_errobj_t *err,
 // parent node. On success returns the zero-based position, on failure returns
 // `(size_t)-1` and extended error information is stored in the `err`
 // parameter.
-// NOTE: Missing test
 size_t xtree_node_child_find (struct xtree_errobj_t *err,
                               const xtree_node_t *parent,
                               const xtree_node_t *child);
@@ -159,26 +160,19 @@ xtree_node_t *xtree_node_child_attach (struct xtree_errobj_t *err,
                                        xtree_node_t *child,
                                        size_t position);
 
-
-
-
-
-
-
-
 // Add an attribute to a node. In the event that the attribute with the
 // specified name already exists, a new attribute with the same name is
-// created and stored. On success a pointer to the value of the new attribute
-// is returned. On error NULL is returned an error information is stored in
-// the mandatory `err` parameter. If node, name or value is NULL, then NULL is
-// returned and extended error information is set in the `err` parameter.
+// created and appended to the list of attributes. On success a pointer to the
+// value of the new attribute is returned. On error NULL is returned an error
+// information is stored in the mandatory `err` parameter. If node, name or
+// value is NULL, then NULL is returned and extended error information is set in
+// the `err` parameter.
 const char *xtree_node_attr_new (struct xtree_errobj_t *err,
                                  xtree_node_t *node,
                                  const char *name, const char *value);
 
 // Returns the number of attributes in the node on success. If the node is
-// NULL or the attribute does not exist, `0` is returned.
-// error.
+// NULL, `0` is returned.
 size_t xtree_node_attr_count (const xtree_node_t *node);
 
 // Set the first attribute with the specified name to the specified value, or
@@ -190,13 +184,17 @@ const char *xtree_node_attr_value_set (struct xtree_errobj_t *err,
 
 // Return the n'th attribute of the specified name, or NULL if the attribute
 // does not exist or if an error occurred. Error information is stored in the
-// mandatory `err` parameter.
+// mandatory `err` parameter.Neither node nor name can be NULL, and will
+// result in an error. If `n` is out of bounds (i.e. there are two attributes
+// with `name` but the third one is requested) then an error is returned.
 const char *xtree_node_attr_value_get (struct xtree_errobj_t *err,
-                                       xtree_node_t *node, size_t i);
+                                       xtree_node_t *node,
+                                       const char *name, size_t n);
 
 // Return the first attribute of the specified name, or NULL if the attribute
 // does not exist or if an error occurred. Error information is stored in the
-// mandatory `err` parameter.
+// mandatory `err` parameter. Neither node nor name can be NULL, and will
+// result in an error.
 const char *xtree_node_attr_value_get1 (struct xtree_errobj_t *err,
                                         xtree_node_t *node, const char *name);
 

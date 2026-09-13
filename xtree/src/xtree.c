@@ -117,9 +117,16 @@ static xtree_kv_t *xtree_kvlist_find (ds_array_t *kvlist, const char *name)
   return NULL;
 }
 
-static xtree_kv_t *xtree_kvlist_get (ds_array_t *kvlist, size_t i)
+static xtree_kv_t *xtree_kvlist_get (ds_array_t *kvlist,
+                                     const char *name, size_t n)
 {
-  return ds_array_get (kvlist, i);
+  size_t nitems = ds_array_length (kvlist);
+  for (size_t i=0; i < nitems; i++) {
+    xtree_kv_t *kv = ds_array_get (kvlist, i);
+    if (!n && ((strcmp (kv->name, name) == 0)))
+      return kv;
+  }
+  return NULL;
 }
 
 
@@ -675,15 +682,15 @@ const char *xtree_node_attr_value_set (struct xtree_errobj_t *err,
 }
 
 const char *xtree_node_attr_value_get (struct xtree_errobj_t *err,
-                                       xtree_node_t *node, size_t i)
+                                       xtree_node_t *node,
+                                       const char *name, size_t n)
 {
   if (!(check_nullparam (err, node, "node")))
     return NULL;
 
-  const xtree_kv_t *kv = xtree_kvlist_get (node->attrs, i);
+  const xtree_kv_t *kv = xtree_kvlist_get (node->attrs, name, n);
   if (!kv) {
-    ERROR (err, xtree_errcode_OUT_OF_BOUNDS,
-           "[%zu]: Out of bounds for kv list", i);
+    ERROR (err, xtree_errcode_OUT_OF_BOUNDS, "[%zu]: Out of bounds for kv list", n);
     return NULL;
   }
   return kv->value;
