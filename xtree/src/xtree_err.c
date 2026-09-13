@@ -20,6 +20,7 @@ const char *xtree_errcode (enum xtree_errcode_t code)
     ERRCODE (xtree_errcode_OUT_OF_BOUNDS),
     ERRCODE (xtree_errcode_INTERNAL_STATE),
     ERRCODE (xtree_errcode_CHILD_NOT_FOUND),
+    ERRCODE (xtree_errcode_NULL_PARAMETER),
   };
   static const size_t nerrcodes = sizeof errcodes / sizeof errcodes[0];
 #undef ERRCODE

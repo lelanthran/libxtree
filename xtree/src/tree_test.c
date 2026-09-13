@@ -755,9 +755,713 @@ cleanup:
   return ret;
 }
 
+// name: test_node_type_string
+int test_node_type_string (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = {};
 
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR("Failed to allocate error object\n");
+    goto cleanup;
+  }
 
+  const char *s_unknown = xtree_node_type_string (xtree_node_type_UNKNOWN);
+  const char *s_atom    = xtree_node_type_string (xtree_node_type_ATOM);
+  const char *s_list    = xtree_node_type_string (xtree_node_type_LIST);
 
+  if (!s_unknown || !s_atom || !s_list) {
+    PERROR("xtree_node_type_string returned NULL for a known type\n");
+    goto cleanup;
+  }
+
+  if (strcmp (s_unknown, "xtree_node_type_UNKNOWN") != 0) {
+    PERROR("Expected UNKNOWN, got [%s]\n", s_unknown);
+    goto cleanup;
+  }
+  if (strcmp (s_atom, "xtree_node_type_ATOM") != 0) {
+    PERROR("Expected ATOM, got [%s]\n", s_atom);
+    goto cleanup;
+  }
+  if (strcmp (s_list, "xtree_node_type_LIST") != 0) {
+    PERROR("Expected LIST, got [%s]\n", s_list);
+    goto cleanup;
+  }
+
+  // Out of range value should not crash
+  const char *s_bogus = xtree_node_type_string ((enum xtree_node_type_t)999);
+  if (!s_bogus) {
+    PERROR("xtree_node_type_string returned NULL for out-of-range value\n");
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
+// name: test_node_name_get_set
+int test_node_name_get_set (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = {};
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  xtree_node_t *node = xtree_node_new (&err, NULL, "initial", xtree_node_type_LIST);
+  if (!node) {
+    PERROR("Failed to create node\n");
+    goto cleanup;
+  }
+
+  const char *name = xtree_node_name_get (node);
+  if (!name || strcmp (name, "initial") != 0) {
+    PERROR("Expected initial name, got [%s]\n", name ? name : "(null)");
+    goto cleanup;
+  }
+
+  const char *set_res = xtree_node_name_set (&err, node, "changed");
+  if (!set_res || strcmp (set_res, "changed") != 0) {
+    PERROR("Failed to set node name\n");
+    goto cleanup;
+  }
+
+  name = xtree_node_name_get (node);
+  if (!name || strcmp (name, "changed") != 0) {
+    PERROR("Name was not actually updated, got [%s]\n", name ? name : "(null)");
+    goto cleanup;
+  }
+
+  // Setting NULL should default to ""
+  set_res = xtree_node_name_set (&err, node, NULL);
+  if (!set_res) {
+    PERROR("Setting name to NULL failed\n");
+    goto cleanup;
+  }
+  name = xtree_node_name_get (node);
+  if (!name || strcmp (name, "") != 0) {
+    PERROR("Expected empty string after NULL name set, got [%s]\n",
+           name ? name : "(null)");
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_node_free (&node);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
+// name: test_node_name_optional
+int test_node_name_optional (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = {};
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  xtree_node_t *node = xtree_node_new (&err, NULL, NULL, xtree_node_type_LIST);
+  if (!node) {
+    PERROR("Failed to create node with NULL name\n");
+    goto cleanup;
+  }
+
+  const char *name = xtree_node_name_get (node);
+  if (!name) {
+    PERROR("Name should default to non-NULL (\"\")\n");
+    goto cleanup;
+  }
+  if (strcmp (name, "") != 0) {
+    PERROR("Expected default name to be \"\", got [%s]\n", name);
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_node_free (&node);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
+// name: test_node_type_get
+int test_node_type_get (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = {};
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  xtree_node_t *atom = xtree_node_new (&err, NULL, "a", xtree_node_type_ATOM);
+  xtree_node_t *list = xtree_node_new (&err, NULL, "l", xtree_node_type_LIST);
+
+  if (!atom || !list) {
+    PERROR("Failed to create nodes\n");
+    goto cleanup;
+  }
+
+  if (xtree_node_type_get (atom) != xtree_node_type_ATOM) {
+    PERROR("Expected ATOM type\n");
+    goto cleanup;
+  }
+  if (xtree_node_type_get (list) != xtree_node_type_LIST) {
+    PERROR("Expected LIST type\n");
+    goto cleanup;
+  }
+
+  // NULL should return UNKNOWN
+  if (xtree_node_type_get (NULL) != xtree_node_type_UNKNOWN) {
+    PERROR("Expected UNKNOWN for NULL node\n");
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_node_free (&atom);
+  xtree_node_free (&list);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
+// name: test_node_type_get_invalid_create
+int test_node_type_get_invalid_create (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = {};
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  // Only ATOM and LIST are allowable per the header docs
+  xtree_node_t *bad = xtree_node_new (&err, NULL, "bad", xtree_node_type_UNKNOWN);
+  if (bad != NULL) {
+    PERROR("Creating node with UNKNOWN type should return NULL\n");
+    xtree_node_free (&bad);
+    goto cleanup;
+  }
+
+  xtree_errobj_reset (&err, 0);
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
+// name: test_node_parent
+int test_node_parent (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = {};
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  if (!root) goto cleanup;
+
+  // A root node should have no parent
+  if (xtree_node_parent (&err, root) != NULL) {
+    PERROR("Root node should have NULL parent\n");
+    goto cleanup;
+  }
+
+  xtree_node_t *child = xtree_node_new (&err, root, "child", xtree_node_type_ATOM);
+  if (!child) {
+    PERROR("Failed to create child\n");
+    goto cleanup;
+  }
+
+  if (xtree_node_parent (&err, child) != root) {
+    PERROR("Child's parent should be root\n");
+    goto cleanup;
+  }
+
+  // After detaching, parent should become NULL
+  xtree_node_t *detached = xtree_node_child_detach (&err, root, 0);
+  if (!detached) {
+    PERROR("Failed to detach child\n");
+    goto cleanup;
+  }
+
+  if (xtree_node_parent (&err, detached) != NULL) {
+    PERROR("Detached node should have NULL parent\n");
+    xtree_node_free (&detached);
+    goto cleanup;
+  }
+
+  xtree_node_free (&detached);
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_node_free (&root);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
+// name: test_value_append
+int test_value_append (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = {};
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  xtree_node_t *node = xtree_node_new (&err, NULL, "atom", xtree_node_type_ATOM);
+  if (!node) {
+    PERROR("Failed to create node\n");
+    goto cleanup;
+  }
+
+  if (!xtree_node_value_set (&err, node, "Hello")) {
+    PERROR("Failed to set initial value\n");
+    goto cleanup;
+  }
+
+  const char *appended = xtree_node_value_append (&err, node, " World");
+  if (!appended) {
+    PERROR("Failed to append to value\n");
+    goto cleanup;
+  }
+  if (strcmp (appended, "Hello World") != 0) {
+    PERROR("Expected [Hello World], got [%s]\n", appended);
+    goto cleanup;
+  }
+
+  const char *check = xtree_node_value_get (&err, node);
+  if (!check || strcmp (check, "Hello World") != 0) {
+    PERROR("Value get after append mismatch, got [%s]\n",
+           check ? check : "(null)");
+    goto cleanup;
+  }
+
+  // Append to a LIST node must fail
+  xtree_node_t *list = xtree_node_new (&err, NULL, "list", xtree_node_type_LIST);
+  if (!list) {
+    PERROR("Failed to create list node\n");
+    goto cleanup;
+  }
+  xtree_errobj_reset (&err, 0);
+  const char *bad = xtree_node_value_append (&err, list, "nope");
+  if (bad != NULL) {
+    PERROR("Append on LIST node should return NULL\n");
+    xtree_node_free (&list);
+    goto cleanup;
+  }
+  xtree_node_free (&list);
+
+  xtree_errobj_reset (&err, 0);
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_node_free (&node);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
+// name: test_child_find
+int test_child_find (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = {};
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  if (!root) goto cleanup;
+
+  xtree_node_t *c0 = xtree_node_new (&err, root, "c0", xtree_node_type_ATOM);
+  xtree_node_t *c1 = xtree_node_new (&err, root, "c1", xtree_node_type_ATOM);
+  xtree_node_t *c2 = xtree_node_new (&err, root, "c2", xtree_node_type_ATOM);
+
+  if (!c0 || !c1 || !c2) {
+    PERROR("Failed to create children\n");
+    goto cleanup;
+  }
+
+  if (xtree_node_child_find (&err, root, c0) != 0) {
+    PERROR("c0 should be at position 0\n");
+    goto cleanup;
+  }
+  if (xtree_node_child_find (&err, root, c1) != 1) {
+    PERROR("c1 should be at position 1\n");
+    goto cleanup;
+  }
+  if (xtree_node_child_find (&err, root, c2) != 2) {
+    PERROR("c2 should be at position 2\n");
+    goto cleanup;
+  }
+
+  // A node not in the tree should return (size_t)-1
+  xtree_node_t *stranger = xtree_node_new (&err, NULL, "stranger", xtree_node_type_ATOM);
+  if (!stranger) {
+    PERROR("Failed to create stranger node\n");
+    goto cleanup;
+  }
+  size_t pos = xtree_node_child_find (&err, root, stranger);
+  if (pos != (size_t)-1) {
+    PERROR("Stranger should not be found, got %zu\n", pos);
+    xtree_node_free (&stranger);
+    goto cleanup;
+  }
+  xtree_node_free (&stranger);
+
+  xtree_errobj_reset (&err, 0);
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_node_free (&root);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
+// name: test_child_append_api
+int test_child_append_api (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = {};
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  if (!root) goto cleanup;
+
+  xtree_node_t *a = xtree_node_new (&err, NULL, "a", xtree_node_type_ATOM);
+  xtree_node_t *b = xtree_node_new (&err, NULL, "b", xtree_node_type_ATOM);
+  if (!a || !b) {
+    PERROR("Failed to create standalone children\n");
+    goto cleanup;
+  }
+
+  xtree_node_t *res = xtree_node_child_append (&err, root, a);
+  if (res != a) {
+    PERROR("child_append should return the appended child\n");
+    goto cleanup;
+  }
+  res = xtree_node_child_append (&err, root, b);
+  if (res != b) {
+    PERROR("child_append should return the appended child\n");
+    goto cleanup;
+  }
+
+  if (xtree_node_child_count (root) != 2) {
+    PERROR("Expected 2 children after append, got %zu\n",
+           xtree_node_child_count (root));
+    goto cleanup;
+  }
+  if (xtree_node_child_get (&err, root, 0) != a) {
+    PERROR("First appended child mismatch\n");
+    goto cleanup;
+  }
+  if (xtree_node_child_get (&err, root, 1) != b) {
+    PERROR("Second appended child mismatch\n");
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_node_free (&root);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
+// name: test_child_append_invalid
+int test_child_append_invalid (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = {};
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  if (!root) goto cleanup;
+
+  // Appending NULL should fail
+  xtree_errobj_reset (&err, 0);
+  if (xtree_node_child_append (&err, root, NULL) != NULL) {
+    PERROR("Appending NULL child should return NULL\n");
+    goto cleanup;
+  }
+
+  // Appending to a NULL parent should fail
+  xtree_node_t *orphan = xtree_node_new (&err, NULL, "orphan", xtree_node_type_ATOM);
+  if (!orphan) {
+    PERROR("Failed to create orphan\n");
+    goto cleanup;
+  }
+  xtree_errobj_reset (&err, 0);
+  if (xtree_node_child_append (&err, NULL, orphan) != NULL) {
+    PERROR("Appending to NULL parent should return NULL\n");
+    xtree_node_free (&orphan);
+    goto cleanup;
+  }
+  xtree_node_free (&orphan);
+
+  // Appending to an ATOM parent should fail
+  xtree_node_t *atom_parent = xtree_node_new (&err, NULL, "ap", xtree_node_type_ATOM);
+  xtree_node_t *child = xtree_node_new (&err, NULL, "c", xtree_node_type_ATOM);
+  if (!atom_parent || !child) {
+    PERROR("Failed to create atom parent / child\n");
+    xtree_node_free (&atom_parent);
+    xtree_node_free (&child);
+    goto cleanup;
+  }
+  xtree_errobj_reset (&err, 0);
+  if (xtree_node_child_append (&err, atom_parent, child) != NULL) {
+    PERROR("Appending to ATOM parent should return NULL\n");
+    xtree_node_free (&atom_parent);
+    xtree_node_free (&child);
+    goto cleanup;
+  }
+  xtree_node_free (&atom_parent);
+  xtree_node_free (&child);
+
+  xtree_errobj_reset (&err, 0);
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_node_free (&root);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
+// name: test_attr_count
+int test_attr_count (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = {};
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  xtree_node_t *node = xtree_node_new (&err, NULL, "node", xtree_node_type_LIST);
+  if (!node) {
+    PERROR("Failed to create node\n");
+    goto cleanup;
+  }
+
+  if (xtree_node_attr_count (node) != 0) {
+    PERROR("Fresh node should have 0 attributes\n");
+    goto cleanup;
+  }
+
+  xtree_node_attr_new (&err, node, "a", "1");
+  xtree_node_attr_new (&err, node, "b", "2");
+  xtree_node_attr_new (&err, node, "a", "3"); // duplicate name
+
+  if (xtree_node_attr_count (node) != 3) {
+    PERROR("Expected 3 attributes, got %zu\n", xtree_node_attr_count (node));
+    goto cleanup;
+  }
+
+  // NULL node should return 0
+  if (xtree_node_attr_count (NULL) != 0) {
+    PERROR("NULL node should return 0 attributes\n");
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_node_free (&node);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
+// name: test_attr_value_get_indexed
+int test_attr_value_get_indexed (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = {};
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  xtree_node_t *node = xtree_node_new (&err, NULL, "node", xtree_node_type_LIST);
+  if (!node) {
+    PERROR("Failed to create node\n");
+    goto cleanup;
+  }
+
+  xtree_node_attr_new (&err, node, "color", "red");
+  xtree_node_attr_new (&err, node, "size",  "large");
+  xtree_node_attr_new (&err, node, "color", "blue"); // duplicate name
+
+  const char *a0 = xtree_node_attr_value_get (&err, node, 0);
+  const char *a1 = xtree_node_attr_value_get (&err, node, 1);
+  const char *a2 = xtree_node_attr_value_get (&err, node, 2);
+
+  if (!a0 || strcmp (a0, "red") != 0) {
+    PERROR("Indexed attr 0 expected [red], got [%s]\n", a0 ? a0 : "(null)");
+    goto cleanup;
+  }
+  if (!a1 || strcmp (a1, "large") != 0) {
+    PERROR("Indexed attr 1 expected [large], got [%s]\n", a1 ? a1 : "(null)");
+    goto cleanup;
+  }
+  if (!a2 || strcmp (a2, "blue") != 0) {
+    PERROR("Indexed attr 2 expected [blue], got [%s]\n", a2 ? a2 : "(null)");
+    goto cleanup;
+  }
+
+  // Out-of-range index should return NULL
+  xtree_errobj_reset (&err, 0);
+  if (xtree_node_attr_value_get (&err, node, 99) != NULL) {
+    PERROR("Out-of-range indexed get should return NULL\n");
+    goto cleanup;
+  }
+
+  xtree_errobj_reset (&err, 0);
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_node_free (&node);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
+// name: test_attr_duplicate_names_get1_vs_index
+int test_attr_duplicate_names_get1_vs_index (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = {};
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  xtree_node_t *node = xtree_node_new (&err, NULL, "node", xtree_node_type_LIST);
+  if (!node) {
+    PERROR("Failed to create node\n");
+    goto cleanup;
+  }
+
+  xtree_node_attr_new (&err, node, "k", "v1");
+  xtree_node_attr_new (&err, node, "k", "v2");
+  xtree_node_attr_new (&err, node, "k", "v3");
+
+  // get1 returns the first match
+  const char *first = xtree_node_attr_value_get1 (&err, node, "k");
+  if (!first || strcmp (first, "v1") != 0) {
+    PERROR("get1 expected [v1], got [%s]\n", first ? first : "(null)");
+    goto cleanup;
+  }
+
+  // Indexed get should expose all three in insertion order
+  const char *i0 = xtree_node_attr_value_get (&err, node, 0);
+  const char *i1 = xtree_node_attr_value_get (&err, node, 1);
+  const char *i2 = xtree_node_attr_value_get (&err, node, 2);
+  if (!i0 || strcmp (i0, "v1") != 0 ||
+      !i1 || strcmp (i1, "v2") != 0 ||
+      !i2 || strcmp (i2, "v3") != 0) {
+    PERROR("Indexed duplicate attribute mismatch\n");
+    goto cleanup;
+  }
+
+  // attr_count should reflect all three
+  if (xtree_node_attr_count (node) != 3) {
+    PERROR("Expected 3 attributes, got %zu\n", xtree_node_attr_count (node));
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_node_free (&node);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
+// name: test_parent_after_attach
+int test_parent_after_attach (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = {};
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  xtree_node_t *parent_a = xtree_node_new (&err, NULL, "a", xtree_node_type_LIST);
+  xtree_node_t *parent_b = xtree_node_new (&err, NULL, "b", xtree_node_type_LIST);
+  if (!parent_a || !parent_b) goto cleanup;
+
+  xtree_node_t *child = xtree_node_new (&err, parent_a, "c", xtree_node_type_ATOM);
+  if (!child) goto cleanup;
+
+  if (xtree_node_parent (&err, child) != parent_a) {
+    PERROR("Child should report parent_a\n");
+    goto cleanup;
+  }
+
+  if (xtree_node_child_attach (&err, parent_b, child, 0) != child) {
+    PERROR("Failed to reparent child\n");
+    goto cleanup;
+  }
+
+  if (xtree_node_parent (&err, child) != parent_b) {
+    PERROR("Child should report parent_b after reparenting\n");
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_node_free (&parent_a);
+  xtree_node_free (&parent_b);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
 
 int main (void)
 {
@@ -785,6 +1489,21 @@ int main (void)
     TEST (test_child_attach_bounds_append),
     TEST (test_node_reparenting),
     TEST (test_tree_dump),
+    /* New tests for previously uncovered API */
+    TEST (test_node_type_string),
+    TEST (test_node_name_get_set),
+    TEST (test_node_name_optional),
+    TEST (test_node_type_get),
+    TEST (test_node_type_get_invalid_create),
+    TEST (test_node_parent),
+    TEST (test_value_append),
+    TEST (test_child_find),
+    TEST (test_child_append_api),
+    TEST (test_child_append_invalid),
+    TEST (test_attr_count),
+    TEST (test_attr_value_get_indexed),
+    TEST (test_attr_duplicate_names_get1_vs_index),
+    TEST (test_parent_after_attach),
   };
 #undef TEST
 
@@ -804,4 +1523,3 @@ int main (void)
   }
   return errcount;
 }
-

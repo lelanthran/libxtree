@@ -10,6 +10,7 @@ enum xtree_errcode_t {
   xtree_errcode_OUT_OF_BOUNDS,
   xtree_errcode_INTERNAL_STATE,
   xtree_errcode_CHILD_NOT_FOUND,
+  xtree_errcode_NULL_PARAMETER,
 };
 
 struct xtree_errobj_t {
