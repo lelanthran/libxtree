@@ -192,7 +192,7 @@ static bool check_type (struct xtree_errobj_t *err,
     ERROR (err, xtree_errcode_PARAMETER_TYPE,
            "Expected note type [%s], got [%s]",
            xtree_node_type_string (type),
-           xtree_node_type_string (node->type));
+           node ? xtree_node_type_string (node->type) : "NULL node object");
     return false;
   }
   return true;
@@ -204,14 +204,11 @@ static bool check_list (struct xtree_errobj_t *err,
   return check_type (err, node, xtree_node_type_LIST);
 }
 
-#if 0 // TODO add a call to this for any function that has to be typed as an
-      // atom
 static bool check_atom (struct xtree_errobj_t *err,
                         const xtree_node_t *node)
 {
   return check_type (err, node, xtree_node_type_ATOM);
 }
-#endif
 
 static bool check_bounds (struct xtree_errobj_t *err,
                           const xtree_node_t *node, size_t position)
@@ -392,24 +389,17 @@ void xtree_node_dump (const xtree_node_t *node, FILE *outf, size_t depth)
 const char *xtree_node_value_set (struct xtree_errobj_t *err,
                                   xtree_node_t *node, const char *value)
 {
-  xtree_errobj_clrerr (err);
-
-  if (!node || node->type != xtree_node_type_ATOM) {
-    ERROR (err, xtree_errcode_PARAMETER_TYPE, "Node is not an ATOM.");
+  if (!(check_atom (err, node)))
     return NULL;
-  }
+
   return str_replace (err, &node->atom._value, value);
 }
 
 const char *xtree_node_value_get (struct xtree_errobj_t *err,
                                   const xtree_node_t *node)
 {
-  xtree_errobj_clrerr (err);
-
-  if (!node || node->type != xtree_node_type_ATOM) {
-    ERROR (err, xtree_errcode_PARAMETER_TYPE, "Node is not an ATOM.");
+  if (!(check_atom (err, node)))
     return NULL;
-  }
 
   return node->atom._value;
 }

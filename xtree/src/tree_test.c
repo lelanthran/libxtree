@@ -13,6 +13,12 @@
   fprintf (stderr, __VA_ARGS__); \
 } while (0)
 
+static void dumperr (struct xtree_errobj_t *err)
+{
+  if (err->libcode || err->syscode) {
+    xtree_errobj_dump (err, stdout);
+  }
+}
 
 static int basic_test (void)
 {
@@ -62,7 +68,6 @@ static int basic_test (void)
         ? xtree_node_type_ATOM
         : xtree_node_type_LIST;
 
-    printf ("type: %i\n", type);
     if (!(tmpnode = xtree_node_new (&err, rootnode, nname, type))) {
       PERROR ("Failed to create childnode %zu\n", i);
       goto cleanup;
@@ -85,15 +90,13 @@ static int basic_test (void)
       PERROR ("Failed to set value or attribute");
       goto cleanup;
     }
-    printf ("set: [%s]\n", set);
   }
 
-  xtree_node_dump (rootnode, NULL, 1);
   ret = EXIT_SUCCESS;
 cleanup:
   xtree_node_free (&tmpnode);
   xtree_node_free (&rootnode);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -115,12 +118,11 @@ int test_create_root_list_node (void)
     goto cleanup;
   }
 
-  printf ("Root list node created successfully.\n");
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_node_free (&node);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -142,12 +144,11 @@ int test_create_root_atom_node (void)
     goto cleanup;
   }
 
-  printf ("Root atom node created successfully.\n");
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_node_free (&node);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -176,11 +177,10 @@ int test_node_free_null_safety (void)
   xtree_node_free (&node);
   xtree_node_free (NULL);
 
-  printf ("Free safety checks passed.\n");
   ret = EXIT_SUCCESS;
 
 cleanup:
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -220,12 +220,11 @@ int test_atom_value_set_get (void)
     goto cleanup;
   }
 
-  printf ("Atom value set/get passed: %s\n", val_out);
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_node_free (&node);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -251,15 +250,14 @@ int test_atom_value_on_list (void)
   if (res != NULL) {
     PERROR("Warning: Value set on LIST node returned success.\n");
     goto cleanup;
-  } else {
-      printf ("Value set on LIST node correctly failed/returned NULL.\n");
   }
 
+  xtree_errobj_reset (&err, 0);
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_node_free (&node);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -295,12 +293,11 @@ int test_attribute_add_get (void)
     goto cleanup;
   }
 
-  printf ("Attribute add/get passed: %s=%s\n", key, retrieved);
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_node_free (&node);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -343,12 +340,11 @@ int test_attribute_update (void)
     goto cleanup;
   }
 
-  printf ("Attribute update passed.\n");
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_node_free (&node);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -376,12 +372,12 @@ int test_attribute_update_nonexistent (void)
     goto cleanup;
   }
 
-  printf ("Attribute update nonexistent correctly returned NULL.\n");
+  xtree_errobj_reset (&err, 0);
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_node_free (&node);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -420,12 +416,11 @@ int test_attribute_duplicate_names (void)
     goto cleanup;
   }
 
-  printf ("Duplicate attribute handling passed.\n");
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_node_free (&node);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -466,13 +461,11 @@ int test_child_append (void)
     }
   }
 
-  printf ("Appended 5 children in order.\n");
-  xtree_node_dump (root, stdout, 0);
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_node_free (&root);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -503,8 +496,6 @@ int test_child_detach_middle (void)
   (void)c1; // Used for setup only
   (void)c3; // Used for setup only
 
-  printf ("Before detach:\n");
-  xtree_node_dump (root, stdout, 0);
 
   xtree_node_t *detached = xtree_node_child_detach (&err, root, 1);
   if (!detached) {
@@ -517,15 +508,13 @@ int test_child_detach_middle (void)
     goto cleanup;
   }
 
-  printf ("After detach (c2):\n");
-  xtree_node_dump (root, stdout, 0);
-
   xtree_node_free (&detached);
+  xtree_errobj_reset (&err, 0);
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_node_free (&root);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -555,12 +544,12 @@ int test_child_detach_bounds (void)
     goto cleanup;
   }
 
-  printf ("Out of bounds detach correctly returned NULL.\n");
+  xtree_errobj_reset (&err, 0);
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_node_free (&root);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -612,13 +601,11 @@ int test_child_insert_at_position (void)
     goto cleanup;
   }
 
-  printf ("After insert at pos 1 (c1, c2, c3):\n");
-  xtree_node_dump (root, stdout, 0);
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_node_free (&root);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -667,13 +654,11 @@ int test_child_attach_bounds_append (void)
     goto cleanup;
   }
 
-  printf ("Attached at pos 100 (should be last: c1, c_new):\n");
-  xtree_node_dump (root, stdout, 0);
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_node_free (&root);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -706,9 +691,6 @@ int test_node_reparenting (void)
     goto cleanup;
   }
 
-  printf ("Initial state (child in A):\n");
-  xtree_node_dump (parent_a, stdout, 0);
-
   xtree_node_t *res = xtree_node_child_attach (&err, parent_b, child, 0);
   if (!res) {
     PERROR("Failed to reparent node\n");
@@ -729,18 +711,12 @@ int test_node_reparenting (void)
     goto cleanup;
   }
 
-  printf ("After reparenting (child in B):\n");
-  printf ("Parent A:\n");
-  xtree_node_dump (parent_a, stdout, 0);
-  printf ("Parent B:\n");
-  xtree_node_dump (parent_b, stdout, 0);
-
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_node_free (&parent_a);
   xtree_node_free (&parent_b);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -770,14 +746,11 @@ int test_tree_dump (void)
   xtree_node_value_set (&err, child, "Data");
   xtree_node_attr_new (&err, child, "id", "101");
 
-  printf ("Visual Tree Dump Test:\n");
-  xtree_node_dump (root, stdout, 0);
-
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_node_free (&root);
-  xtree_errobj_dump (&err, stdout);
+  dumperr (&err);
   xtree_errobj_reset (&err, 0);
   return ret;
 }
@@ -821,7 +794,7 @@ int main (void)
           "Diff this output against ./tests/outputs/tree_test.expected\n");
   for (size_t i=0; i<ntests; i++) {
     int rc = tests[i].fptr ();
-    printf ("[%s]: %s\n", tests[i].name, rc ? "failed" : "passed");
+    printf ("[%s]: %s\n", rc ? "failed" : "passed", tests[i].name);
     errcount += rc ? 1 : 0;
   }
   if (errcount) {
