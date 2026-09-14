@@ -1,9 +1,16 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+
+#include <unistd.h>
+
+
 /* Small test program to test the xtree library */
+#include "ds_str.h"
 #include "xtree_err.h"
 #include "xtree.h"
 
@@ -18,6 +25,84 @@ static void dumperr (struct xtree_errobj_t *err)
   if (err->libcode || err->syscode) {
     xtree_errobj_dump (err, stdout);
   }
+}
+
+/* Read an entire file into a single heap-allocated NUL-terminated
+ * string. Caller must free the returned buffer. Returns NULL on
+ * error. */
+static char *fslurp (const char *fname)
+{
+  if (!fname)
+    return NULL;
+
+  FILE *f = fopen (fname, "rb");
+  if (!f)
+    return NULL;
+
+  if (fseek (f, 0, SEEK_END) != 0) {
+    fclose (f);
+    return NULL;
+  }
+
+  long len = ftell (f);
+  if (len < 0) {
+    fclose (f);
+    return NULL;
+  }
+  rewind (f);
+
+  char *buf = malloc ((size_t)len + 1);
+  if (!buf) {
+    fclose (f);
+    return NULL;
+  }
+
+  size_t got = fread (buf, 1, (size_t)len, f);
+  fclose (f);
+
+  if (got != (size_t)len) {
+    free (buf);
+    return NULL;
+  }
+
+  buf[(size_t)len] = '\0';
+  return buf;
+}
+
+/* Create a temporary file under /tmp. On success *dst_fname is set to a
+ * heap-allocated filename (caller must free) and *dst_outf to an open
+ * FILE* (caller must fclose). Returns true on success, false on
+ * error. */
+static bool fdump (char **dst_fname, FILE **dst_outf)
+{
+  if (!dst_fname || !dst_outf)
+    return false;
+
+  *dst_fname = NULL;
+  *dst_outf = NULL;
+
+  char tmpl[] = "/tmp/xtree_dump_XXXXXX";
+  int fd = mkstemp (tmpl);
+  if (fd < 0)
+    return false;
+
+  FILE *outf = fdopen (fd, "w+");
+  if (!outf) {
+    close (fd);
+    remove (tmpl);
+    return false;
+  }
+
+  char *fname = ds_str_dup (tmpl);
+  if (!fname) {
+    fclose (outf);
+    remove (tmpl);
+    return false;
+  }
+
+  *dst_fname = fname;
+  *dst_outf = outf;
+  return true;
 }
 
 static int basic_test (void)
@@ -1789,49 +1874,222 @@ int test_node_dump (void)
 {
   int ret = EXIT_FAILURE;
   struct xtree_errobj_t err = { 0 };
-  FILE *sink = NULL;
+  FILE *outf = NULL;
+  char *fname = NULL;
+  char *actual = NULL;
+
+  xtree_node_t *root = NULL;
+  xtree_node_t *group = NULL;
+  xtree_node_t *leaf1 = NULL;
+  xtree_node_t *leaf2 = NULL;
+  xtree_node_t *branch = NULL;
+  xtree_node_t *empty = NULL;
+  xtree_node_t *topatom = NULL;
+
+  /* Expected dump, using the same format produced by xtree_node_dump:
+   *
+   *   - one space of indent per depth level
+   *   - parent is printed as "No parent" for a root node, otherwise
+   *     the parent's name (which may be the empty string)
+   *   - attribute lines use the node's name (which may be the empty
+   *     string) between "node:" and ":attr[...]"
+   *
+   * The tree under test is built below in the same order as this
+   * expected string.
+   */
+  static const char *expected =
+    "node:         (root)\n"
+    "node:type     [2]\n"
+    "node:parent   [No parent]\n"
+    "node:nattrs     3\n"
+    "node:root:attr[version:1.0]\n"
+    "node:root:attr[id:r1]\n"
+    "node:root:attr[id:r2]\n"
+    "node:nchildren  3\n"
+    " node:         ()\n"
+    " node:type     [2]\n"
+    " node:parent   [root]\n"
+    " node:nattrs     3\n"
+    " node::attr[kind:group]\n"
+    " node::attr[k:v1]\n"
+    " node::attr[k:v2]\n"
+    " node:nchildren  2\n"
+    "  node:         (leaf1)\n"
+    "  node:type     [1]\n"
+    "  node:parent   []\n"
+    "  node:nattrs     3\n"
+    "  node:leaf1:attr[id:l1]\n"
+    "  node:leaf1:attr[tag:first]\n"
+    "  node:leaf1:attr[tag:second]\n"
+    "  node:value  [alpha]\n"
+    "  node:         ()\n"
+    "  node:type     [1]\n"
+    "  node:parent   []\n"
+    "  node:nattrs     0\n"
+    "  node:value  [beta]\n"
+    " node:         (branch)\n"
+    " node:type     [2]\n"
+    " node:parent   [root]\n"
+    " node:nattrs     0\n"
+    " node:nchildren  1\n"
+    "  node:         (empty)\n"
+    "  node:type     [2]\n"
+    "  node:parent   [branch]\n"
+    "  node:nattrs     0\n"
+    "  node:nchildren  0\n"
+    " node:         (topatom)\n"
+    " node:type     [1]\n"
+    " node:parent   [root]\n"
+    " node:nattrs     1\n"
+    " node:topatom:attr[id:t1]\n"
+    " node:value  [delta]\n";
 
   if (!(xtree_errobj_reset (&err, 1024))) {
-    PERROR("Failed to allocate error object\n");
+    PERROR ("Failed to allocate error object\n");
     goto cleanup;
   }
 
-  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
-  if (!root) goto cleanup;
+  /* Root: LIST "root" with a version attribute and two duplicate id
+   * attributes, exercising ordered duplicate keys. */
+  root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  if (!root) {
+    PERROR ("Failed to create root node\n");
+    goto cleanup;
+  }
+  if (!xtree_node_attr_new (&err, root, "version", "1.0")) {
+    PERROR ("Failed to add root attribute version\n");
+    goto cleanup;
+  }
+  if (!xtree_node_attr_new (&err, root, "id", "r1")) {
+    PERROR ("Failed to add root attribute id r1\n");
+    goto cleanup;
+  }
+  if (!xtree_node_attr_new (&err, root, "id", "r2")) {
+    PERROR ("Failed to add root attribute id r2\n");
+    goto cleanup;
+  }
 
-  xtree_node_attr_new (&err, root, "version", "1.0");
+  /* Anonymous intermediate LIST node with three attributes (including
+   * a duplicate k key) and two children. */
+  group = xtree_node_new (&err, root, NULL, xtree_node_type_LIST);
+  if (!group) {
+    PERROR ("Failed to create group node\n");
+    goto cleanup;
+  }
+  if (!xtree_node_attr_new (&err, group, "kind", "group")) {
+    PERROR ("Failed to add group attribute kind\n");
+    goto cleanup;
+  }
+  if (!xtree_node_attr_new (&err, group, "k", "v1")) {
+    PERROR ("Failed to add group attribute k v1\n");
+    goto cleanup;
+  }
+  if (!xtree_node_attr_new (&err, group, "k", "v2")) {
+    PERROR ("Failed to add group attribute k v2\n");
+    goto cleanup;
+  }
 
-  xtree_node_t *child = xtree_node_new (&err, root, "item", xtree_node_type_ATOM);
-  if (!child) {
-    PERROR("Failed to create child\n");
+  /* Named ATOM with a value and duplicate tag attributes. */
+  leaf1 = xtree_node_new (&err, group, "leaf1", xtree_node_type_ATOM);
+  if (!leaf1) {
+    PERROR ("Failed to create leaf1 node\n");
     goto cleanup;
   }
-  xtree_node_value_set (&err, child, "Data");
-  xtree_node_attr_new (&err, child, "id", "101");
+  if (!xtree_node_value_set (&err, leaf1, "alpha")) {
+    PERROR ("Failed to set leaf1 value\n");
+    goto cleanup;
+  }
+  if (!xtree_node_attr_new (&err, leaf1, "id", "l1")) {
+    PERROR ("Failed to add leaf1 attribute id\n");
+    goto cleanup;
+  }
+  if (!xtree_node_attr_new (&err, leaf1, "tag", "first")) {
+    PERROR ("Failed to add leaf1 attribute tag first\n");
+    goto cleanup;
+  }
+  if (!xtree_node_attr_new (&err, leaf1, "tag", "second")) {
+    PERROR ("Failed to add leaf1 attribute tag second\n");
+    goto cleanup;
+  }
 
-  // Dump to a scratch file so the golden-output diff on stdout is not
-  // affected; verify something was actually written.
-  sink = tmpfile ();
-  if (!sink) {
-    PERROR("tmpfile failed\n");
+  /* Anonymous ATOM with a value but no attributes. */
+  leaf2 = xtree_node_new (&err, group, NULL, xtree_node_type_ATOM);
+  if (!leaf2) {
+    PERROR ("Failed to create leaf2 node\n");
     goto cleanup;
   }
-  xtree_node_dump (root, sink, 0);
-  if (fflush (sink) != 0) {
-    PERROR("fflush of dump output failed\n");
+  if (!xtree_node_value_set (&err, leaf2, "beta")) {
+    PERROR ("Failed to set leaf2 value\n");
     goto cleanup;
   }
-  if (ftell (sink) <= 0) {
-    PERROR("xtree_node_dump produced no output\n");
+
+  /* LIST with no attributes that contains a single empty LIST child. */
+  branch = xtree_node_new (&err, root, "branch", xtree_node_type_LIST);
+  if (!branch) {
+    PERROR ("Failed to create branch node\n");
     goto cleanup;
   }
-  fclose (sink);
-  sink = NULL;
+
+  empty = xtree_node_new (&err, branch, "empty", xtree_node_type_LIST);
+  if (!empty) {
+    PERROR ("Failed to create empty node\n");
+    goto cleanup;
+  }
+
+  /* Named ATOM sibling with a value and a single attribute. */
+  topatom = xtree_node_new (&err, root, "topatom", xtree_node_type_ATOM);
+  if (!topatom) {
+    PERROR ("Failed to create topatom node\n");
+    goto cleanup;
+  }
+  if (!xtree_node_value_set (&err, topatom, "delta")) {
+    PERROR ("Failed to set topatom value\n");
+    goto cleanup;
+  }
+  if (!xtree_node_attr_new (&err, topatom, "id", "t1")) {
+    PERROR ("Failed to add topatom attribute id\n");
+    goto cleanup;
+  }
+
+  /* Dump to a temp file under /tmp, slurp it back, compare. */
+  if (!fdump (&fname, &outf)) {
+    PERROR ("Failed to create temporary dump file\n");
+    goto cleanup;
+  }
+
+  xtree_node_dump (root, outf, 0);
+
+  if (fclose (outf) != 0) {
+    PERROR ("Failed to close temporary dump file\n");
+    outf = NULL;
+    goto cleanup;
+  }
+  outf = NULL;
+
+  actual = fslurp (fname);
+  if (!actual) {
+    PERROR ("Failed to read temporary dump file [%s]\n", fname);
+    goto cleanup;
+  }
+
+  if (strcmp (actual, expected) != 0) {
+    PERROR ("Dump does not match expected output\n"
+            "--- expected ---\n%s"
+            "--- actual ---\n%s",
+            expected, actual);
+    goto cleanup;
+  }
 
   ret = EXIT_SUCCESS;
 
 cleanup:
-  if (sink) fclose (sink);
+  if (outf)
+    fclose (outf);
+  if (fname) {
+    remove (fname);
+    free (fname);
+  }
+  free (actual);
   xtree_node_free (&root);
   dumperr (&err);
   xtree_errobj_reset (&err, 0);
@@ -1907,6 +2165,7 @@ cleanup:
   xtree_errobj_reset (&err, 0);
   return ret;
 }
+
 int main (void)
 {
   int errcount = 0;

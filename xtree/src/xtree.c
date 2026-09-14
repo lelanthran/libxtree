@@ -378,19 +378,19 @@ void xtree_node_dump (const xtree_node_t *node, FILE *outf, size_t depth)
 #define INDENT    for (size_t i=0; i<depth; i++) fprintf (outf, " ")
 
   INDENT;
-  fprintf (outf, "node:%p (%s)\n", node, node->name);
+  fprintf (outf, "node:         (%s)\n", node->name);
   INDENT;
   fprintf (outf, "node:type     [%i]\n", node->type);
   INDENT;
-  fprintf (outf, "node:parent   [%p]\n", node->parent);
+  fprintf (outf, "node:parent   [%s]\n", node->parent ? node->parent->name : "No parent");
   INDENT;
   fprintf (outf, "node:nattrs     %zu\n", ds_array_length (node->attrs));
   size_t nitems = ds_array_length (node->attrs);
   for (size_t i=0; i<nitems; i++) {
     xtree_kv_t *kv = ds_array_get (node->attrs, i);
     INDENT;
-    fprintf (outf, "node:%p:attr  [%s:%s]\n",
-             node, kv->name, kv->value);
+    fprintf (outf, "node:%s:attr[%s:%s]\n",
+             node->name, kv->name, kv->value);
   }
 
   INDENT;
