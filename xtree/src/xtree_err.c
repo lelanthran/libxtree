@@ -6,7 +6,7 @@
 
 #include "xtree_err.h"
 
-const char *xtree_errcode (enum xtree_errcode_t code)
+const char *xtree_errcode_str (enum xtree_errcode_t code)
 {
 #define ERRCODE(x)    { x, #x }
   static const struct {

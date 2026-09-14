@@ -19,6 +19,9 @@
  * is either of type ATOM (stores a value) or of type LIST (stores a list of
  * atoms).
  *
+ * For maximum compatibility, the attributes are stored ordered, with
+ * duplicate keys allowed.
+ *
  * A general tree such as this is applicable to a really large variety of
  * uses:
  * 1. Storing HTML (or XML type tagged trees)
@@ -136,6 +139,7 @@ size_t xtree_node_child_find (struct xtree_errobj_t *err,
 // parent has to be non-NULL and of type LIST and child has to be non-null.
 // On success a pointer to the child node is returned. On error NULL is
 // returned and extended error information is stored in the `err` parameter.
+// The child is re-parented if necessary.
 xtree_node_t *xtree_node_child_append (struct xtree_errobj_t *err,
                                        xtree_node_t *parent,
                                        xtree_node_t *child);
@@ -159,6 +163,15 @@ xtree_node_t *xtree_node_child_attach (struct xtree_errobj_t *err,
                                        xtree_node_t *parent,
                                        xtree_node_t *child,
                                        size_t position);
+
+
+
+
+
+
+
+
+
 
 // Add an attribute to a node. In the event that the attribute with the
 // specified name already exists, a new attribute with the same name is
@@ -188,7 +201,7 @@ const char *xtree_node_attr_value_set (struct xtree_errobj_t *err,
 // result in an error. If `n` is out of bounds (i.e. there are two attributes
 // with `name` but the third one is requested) then an error is returned.
 const char *xtree_node_attr_value_get (struct xtree_errobj_t *err,
-                                       xtree_node_t *node,
+                                       const xtree_node_t *node,
                                        const char *name, size_t n);
 
 // Return the first attribute of the specified name, or NULL if the attribute
@@ -196,7 +209,8 @@ const char *xtree_node_attr_value_get (struct xtree_errobj_t *err,
 // mandatory `err` parameter. Neither node nor name can be NULL, and will
 // result in an error.
 const char *xtree_node_attr_value_get1 (struct xtree_errobj_t *err,
-                                        xtree_node_t *node, const char *name);
+                                        const xtree_node_t *node,
+                                        const char *name);
 
 
 

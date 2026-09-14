@@ -121,10 +121,14 @@ static xtree_kv_t *xtree_kvlist_get (ds_array_t *kvlist,
                                      const char *name, size_t n)
 {
   size_t nitems = ds_array_length (kvlist);
+  size_t count = 0;
   for (size_t i=0; i < nitems; i++) {
     xtree_kv_t *kv = ds_array_get (kvlist, i);
-    if (!n && ((strcmp (kv->name, name) == 0)))
-      return kv;
+    if (((strcmp (kv->name, name)) == 0)) {
+      if (count == n)
+        return kv;
+      count++;
+    }
   }
   return NULL;
 }
@@ -682,10 +686,11 @@ const char *xtree_node_attr_value_set (struct xtree_errobj_t *err,
 }
 
 const char *xtree_node_attr_value_get (struct xtree_errobj_t *err,
-                                       xtree_node_t *node,
+                                       const xtree_node_t *node,
                                        const char *name, size_t n)
 {
-  if (!(check_nullparam (err, node, "node")))
+  if (!(check_nullparam (err, node, "node")) ||
+      !(check_nullparam (err, name, "name")))
     return NULL;
 
   const xtree_kv_t *kv = xtree_kvlist_get (node->attrs, name, n);
@@ -697,7 +702,8 @@ const char *xtree_node_attr_value_get (struct xtree_errobj_t *err,
 }
 
 const char *xtree_node_attr_value_get1 (struct xtree_errobj_t *err,
-                                        xtree_node_t *node, const char *name)
+                                        const xtree_node_t *node,
+                                        const char *name)
 {
   xtree_errobj_clrerr (err);
 
