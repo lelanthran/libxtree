@@ -1,0 +1,28 @@
+// What does an adaptor look like?
+
+```c
+
+bool myparser (libctx_t *ctx, xtree_rxer_t *rxer)
+{
+  // ...
+  while (parse_token (handle, &token)) {
+    switch (token.type) {
+
+      case token_NODE:
+        emit (ctx, rxer, NODE_START, token);
+        break;
+
+      case token_ATTR:
+        parse_attr_name (handle, &name_token);
+        parse_attr_value (handle, &value_token);
+        emit (ctx, rxer, ADD_ATTR, &name_token, &value_token);
+
+      case token_CONTENT:
+        emit (ctx, rxer, ADD_CONTENT, content_token);
+
+    }
+  }
+  // ...
+}
+```
+
