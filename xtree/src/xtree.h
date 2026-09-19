@@ -9,7 +9,7 @@
  *
  * In the same spirit as CORBA, COM, etc, the intention is to have a single
  * internal format that any adaptor can serialise to and from, so that a tree
- * ingested in any adaptor's format can be outputted in any other adaptors
+ * ingested in any adaptor's format can be emitted in any other adaptor
  * format.
  *
  * The general form is:
