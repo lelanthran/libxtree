@@ -13,6 +13,7 @@
 #include "ds_str.h"
 #include "xtree_err.h"
 #include "xtree.h"
+#include "xtree_reader.h"
 
 
 #define PERROR(...)   do { \
@@ -2166,6 +2167,1416 @@ cleanup:
   return ret;
 }
 
+/* ------------------------------------------------------------------
+ * Tests for xtree_reader_t
+ *
+ * Notes on the assumptions made by these tests:
+ *
+ *   - xtree_reader_get() and xtree_reader_peek() return EOF when there
+ *     is nothing left to read.
+ *   - The absolute starting values of xtree_reader_line() and
+ *     xtree_reader_cpos() are not assumed (0-based or 1-based); the
+ *     tests record the starting values and check relative changes.
+ *   - There is no whitespace handling in the reader: every character of
+ *     the input, whitespace included, is returned as-is by get and peek.
+ *   - A newline moves the reader to the next line and resets the
+ *     character position to its starting value.
+ *   - xtree_reader_unget() only works once: it is never called twice
+ *     without an intervening xtree_reader_get() (or before the first
+ *     get), as that behaviour is undefined.
+ *   - xtree_reader_error() returns NULL when the reader has no error,
+ *     and otherwise a pointer to a read-only xtree_errobj_t that is
+ *     owned by the reader (the caller does not free or reset it).
+ * ------------------------------------------------------------------ */
+
+/* Check that the next character returned by the reader is `expected`.
+ * Returns true on a match, false (after reporting the mismatch)
+ * otherwise. */
+static bool rdr_expect_get (xtree_reader_t *reader, int expected)
+{
+  int got = xtree_reader_get (reader);
+  if (got != expected) {
+    PERROR ("Expected get to return [%i], got [%i]\n", expected, got);
+    return false;
+  }
+  return true;
+}
+
+/* Report every field of an error object returned by the reader. */
+static void rdr_print_errobj (const struct xtree_errobj_t *err)
+{
+  PERROR ("errobj: libcode=%i libmsg=[%.*s] syscode=%i sysmsg=[%.*s] "
+          "src=[%.*s:%i] message=[%s] message_len=%zu\n",
+          (int)err->libcode, (int)sizeof err->libmsg, err->libmsg,
+          err->syscode, (int)sizeof err->sysmsg, err->sysmsg,
+          (int)sizeof err->srcfile, err->srcfile, err->srcline,
+          err->message ? err->message : "", err->message_len);
+}
+
+/* Check that the reader has no error: xtree_reader_error() must return
+ * NULL. If it does not, the contents of the error object are reported.
+ * Returns true if there is no error. */
+static bool rdr_expect_noerror (const xtree_reader_t *reader)
+{
+  const struct xtree_errobj_t *err = xtree_reader_error (reader);
+  if (err) {
+    PERROR ("Reader should not have an error object\n");
+    rdr_print_errobj (err);
+    return false;
+  }
+  return true;
+}
+
+/* Check that an error object returned by the reader is well-formed: it
+ * records an error (libcode or syscode set), the fixed-size strings are
+ * all NUL-terminated within their buffers, and the dynamic message, if
+ * present, is NUL-terminated within message_len. Returns true if the
+ * object is well-formed. */
+static bool rdr_expect_wellformed_errobj (const struct xtree_errobj_t *err)
+{
+  if (!err) {
+    PERROR ("Error object is NULL\n");
+    return false;
+  }
+  if (!err->libcode && !err->syscode) {
+    PERROR ("Error object is set but records neither a libcode nor a "
+            "syscode\n");
+    rdr_print_errobj (err);
+    return false;
+  }
+  if (!memchr (err->sysmsg, '\0', sizeof err->sysmsg) ||
+      !memchr (err->libmsg, '\0', sizeof err->libmsg) ||
+      !memchr (err->srcfile, '\0', sizeof err->srcfile)) {
+    PERROR ("Error object has an unterminated fixed-size string\n");
+    return false;
+  }
+  if (err->message && !memchr (err->message, '\0', err->message_len)) {
+    PERROR ("Error object message is not terminated within message_len\n");
+    return false;
+  }
+  return true;
+}
+
+// name: test_reader_create_free
+int test_reader_create_free (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+
+  reader = xtree_reader_str ("test", "abc");
+  if (!reader) {
+    PERROR ("Failed to create reader from string\n");
+    goto cleanup;
+  }
+
+  if (!rdr_expect_noerror (reader))
+    goto cleanup;
+  if (xtree_reader_eof (reader)) {
+    PERROR ("Reader over non-empty input must not start at EOF\n");
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_free_null_safety
+int test_reader_free_null_safety (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+
+  reader = xtree_reader_str ("test", "abc");
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  // Test standard free
+  xtree_reader_free (&reader);
+  if (reader != NULL) {
+    PERROR ("xtree_reader_free should set the pointer to NULL\n");
+    goto cleanup;
+  }
+
+  // Test freeing NULL pointer (should not crash)
+  xtree_reader_free (&reader);
+  xtree_reader_free (NULL);
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_str_null_input
+int test_reader_str_null_input (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+
+  reader = xtree_reader_str ("test", NULL);
+  if (reader != NULL) {
+    PERROR ("Creating a reader from a NULL string should return NULL\n");
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_empty_input
+int test_reader_empty_input (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+
+  reader = xtree_reader_str ("test", "");
+  if (!reader) {
+    PERROR ("Failed to create reader from the empty string\n");
+    goto cleanup;
+  }
+
+  if (xtree_reader_peek (reader) != EOF) {
+    PERROR ("Peek on empty input should return EOF\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+
+  if (!xtree_reader_eof (reader)) {
+    PERROR ("Reader should report EOF after reading empty input\n");
+    goto cleanup;
+  }
+  // Reaching EOF is not an error.
+  if (!rdr_expect_noerror (reader))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_get_sequence
+int test_reader_get_sequence (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+
+  reader = xtree_reader_str ("test", "abc");
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  if (!rdr_expect_get (reader, 'a'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, 'b'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, 'c'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_eof_transitions
+int test_reader_eof_transitions (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+
+  reader = xtree_reader_str ("test", "x");
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  if (xtree_reader_eof (reader)) {
+    PERROR ("Reader must not be at EOF before reading anything\n");
+    goto cleanup;
+  }
+
+  if (!rdr_expect_get (reader, 'x'))
+    goto cleanup;
+
+  // Reading past the end returns EOF and sets the EOF state.
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+  if (!xtree_reader_eof (reader)) {
+    PERROR ("Reader should report EOF after reading past the end\n");
+    goto cleanup;
+  }
+
+  // EOF is sticky: further reads keep returning EOF without erroring.
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+  if (!xtree_reader_eof (reader)) {
+    PERROR ("EOF state should persist on repeated reads\n");
+    goto cleanup;
+  }
+  // Reaching EOF must not set the error object.
+  if (!rdr_expect_noerror (reader))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_peek_no_advance
+int test_reader_peek_no_advance (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+
+  reader = xtree_reader_str ("test", "xy");
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  size_t line = xtree_reader_line (reader);
+  size_t cpos = xtree_reader_cpos (reader);
+
+  // Peeking repeatedly returns the same character...
+  if (xtree_reader_peek (reader) != 'x') {
+    PERROR ("First peek should return [x]\n");
+    goto cleanup;
+  }
+  if (xtree_reader_peek (reader) != 'x') {
+    PERROR ("Second peek should still return [x]\n");
+    goto cleanup;
+  }
+
+  // ...and does not move the position.
+  if (xtree_reader_line (reader) != line ||
+      xtree_reader_cpos (reader) != cpos) {
+    PERROR ("Peek must not change the line number or character position\n");
+    goto cleanup;
+  }
+
+  // The peeked character is then the one that get returns.
+  if (!rdr_expect_get (reader, 'x'))
+    goto cleanup;
+  if (xtree_reader_peek (reader) != 'y') {
+    PERROR ("Peek after get should return [y]\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_get (reader, 'y'))
+    goto cleanup;
+
+  // Peeking at the end returns EOF.
+  if (xtree_reader_peek (reader) != EOF) {
+    PERROR ("Peek at the end of input should return EOF\n");
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_whitespace_returned
+int test_reader_whitespace_returned (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+
+  reader = xtree_reader_str ("test", " \t\r\n x ");
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  // Every whitespace character is significant and is returned as-is.
+  if (!rdr_expect_get (reader, ' '))
+    goto cleanup;
+  if (!rdr_expect_get (reader, '\t'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, '\r'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, '\n'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, ' '))
+    goto cleanup;
+  if (!rdr_expect_get (reader, 'x'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, ' '))
+    goto cleanup;
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_whitespace_only_input
+int test_reader_whitespace_only_input (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+
+  reader = xtree_reader_str ("test", "  \n\t");
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  // Whitespace-only input is returned character by character; it is
+  // not mistaken for an empty input.
+  if (!rdr_expect_get (reader, ' '))
+    goto cleanup;
+  if (!rdr_expect_get (reader, ' '))
+    goto cleanup;
+  if (!rdr_expect_get (reader, '\n'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, '\t'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+  if (!xtree_reader_eof (reader)) {
+    PERROR ("Reader should be at EOF after reading all whitespace\n");
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_peek_whitespace
+int test_reader_peek_whitespace (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+
+  reader = xtree_reader_str ("test", " x");
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  size_t line = xtree_reader_line (reader);
+  size_t cpos = xtree_reader_cpos (reader);
+
+  // Whitespace is returned by peek just like any other character, and
+  // peeking does not move the position.
+  if (xtree_reader_peek (reader) != ' ') {
+    PERROR ("Peek should return the leading space\n");
+    goto cleanup;
+  }
+  if (xtree_reader_line (reader) != line ||
+      xtree_reader_cpos (reader) != cpos) {
+    PERROR ("Peek must not change the position\n");
+    goto cleanup;
+  }
+
+  if (!rdr_expect_get (reader, ' '))
+    goto cleanup;
+  if (!rdr_expect_get (reader, 'x'))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_line_tracking
+int test_reader_line_tracking (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+
+  reader = xtree_reader_str ("test", "a\nb\n\nc");
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  // Each newline is returned and advances the line by one.
+  size_t start = xtree_reader_line (reader);
+
+  if (!rdr_expect_get (reader, 'a'))
+    goto cleanup;
+  if (xtree_reader_line (reader) != start) {
+    PERROR ("Line should not change after reading [a]\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_get (reader, '\n'))
+    goto cleanup;
+  if (xtree_reader_line (reader) != start + 1) {
+    PERROR ("Line should be %zu after the first newline, got %zu\n",
+            start + 1, xtree_reader_line (reader));
+    goto cleanup;
+  }
+  if (!rdr_expect_get (reader, 'b'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, '\n'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, '\n'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, 'c'))
+    goto cleanup;
+  if (xtree_reader_line (reader) != start + 3) {
+    PERROR ("Line should be %zu after reading everything, got %zu\n",
+            start + 3, xtree_reader_line (reader));
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_cpos_tracking
+int test_reader_cpos_tracking (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+  xtree_reader_t *multi = NULL;
+
+  reader = xtree_reader_str ("test", "abc");
+  multi = xtree_reader_str ("test", "ab\ncd");
+  if (!reader || !multi) {
+    PERROR ("Failed to create readers\n");
+    goto cleanup;
+  }
+
+  // Each character read advances the character position by one.
+  size_t start = xtree_reader_cpos (reader);
+  for (size_t i=0; i<3; i++) {
+    if (xtree_reader_cpos (reader) != start + i) {
+      PERROR ("Before reading character %zu: expected cpos %zu, got %zu\n",
+              i, start + i, xtree_reader_cpos (reader));
+      goto cleanup;
+    }
+    if (xtree_reader_get (reader) == EOF) {
+      PERROR ("Unexpected EOF at character %zu\n", i);
+      goto cleanup;
+    }
+  }
+  if (xtree_reader_cpos (reader) != start + 3) {
+    PERROR ("After reading 3 characters: expected cpos %zu, got %zu\n",
+            start + 3, xtree_reader_cpos (reader));
+    goto cleanup;
+  }
+
+  // A newline resets the character position.
+  start = xtree_reader_cpos (multi);
+  if (!rdr_expect_get (multi, 'a'))
+    goto cleanup;
+  if (!rdr_expect_get (multi, 'b'))
+    goto cleanup;
+  if (xtree_reader_cpos (multi) != start + 2) {
+    PERROR ("Expected cpos %zu before the newline, got %zu\n",
+            start + 2, xtree_reader_cpos (multi));
+    goto cleanup;
+  }
+  if (!rdr_expect_get (multi, '\n'))
+    goto cleanup;
+  if (xtree_reader_cpos (multi) != start) {
+    PERROR ("Newline should reset cpos to %zu, got %zu\n",
+            start, xtree_reader_cpos (multi));
+    goto cleanup;
+  }
+  if (!rdr_expect_get (multi, 'c'))
+    goto cleanup;
+  if (xtree_reader_cpos (multi) != start + 1) {
+    PERROR ("Expected cpos %zu after [c], got %zu\n",
+            start + 1, xtree_reader_cpos (multi));
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  xtree_reader_free (&multi);
+  return ret;
+}
+
+// name: test_reader_unget_basic
+int test_reader_unget_basic (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+
+  reader = xtree_reader_str ("test", "ab");
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  if (!rdr_expect_get (reader, 'a'))
+    goto cleanup;
+
+  xtree_reader_unget (reader);
+  if (xtree_reader_peek (reader) != 'a') {
+    PERROR ("Peek after unget should return the ungotten [a]\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_get (reader, 'a'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, 'b'))
+    goto cleanup;
+
+  xtree_reader_unget (reader);
+  if (!rdr_expect_get (reader, 'b'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_unget_repeated_cycles
+int test_reader_unget_repeated_cycles (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+  static const char *input = "abc";
+
+  reader = xtree_reader_str ("test", input);
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  // Unget only works once without an intervening get, but it may be used
+  // again after each get: every character can be read, ungotten and read
+  // again, all the way through the input.
+  for (size_t i=0; input[i]; i++) {
+    if (!rdr_expect_get (reader, input[i]))
+      goto cleanup;
+    xtree_reader_unget (reader);
+    if (!rdr_expect_get (reader, input[i]))
+      goto cleanup;
+  }
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_unget_restores_position
+int test_reader_unget_restores_position (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+  const int expected[3] = { 'a', '\n', 'b' };
+  size_t lines[3];
+  size_t cposs[3];
+
+  reader = xtree_reader_str ("test", "a\nb");
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  // For each character: record the position, get it, unget it, and check
+  // that the position is restored. This includes stepping back across the
+  // newline. Unget is only used once per get.
+  for (size_t i=0; i<3; i++) {
+    lines[i] = xtree_reader_line (reader);
+    cposs[i] = xtree_reader_cpos (reader);
+
+    if (!rdr_expect_get (reader, expected[i]))
+      goto cleanup;
+
+    xtree_reader_unget (reader);
+    if (xtree_reader_line (reader) != lines[i]) {
+      PERROR ("Unget after character %zu: expected line %zu, got %zu\n",
+              i, lines[i], xtree_reader_line (reader));
+      goto cleanup;
+    }
+    if (xtree_reader_cpos (reader) != cposs[i]) {
+      PERROR ("Unget after character %zu: expected cpos %zu, got %zu\n",
+              i, cposs[i], xtree_reader_cpos (reader));
+      goto cleanup;
+    }
+
+    // Re-reading must reproduce the same character, and leave the
+    // position where a plain get would have left it.
+    if (!rdr_expect_get (reader, expected[i]))
+      goto cleanup;
+  }
+
+  // After the re-reads the reader must be at the end of the input, on the
+  // second line.
+  if (xtree_reader_line (reader) != lines[2]) {
+    PERROR ("Expected line %zu at the end, got %zu\n",
+            lines[2], xtree_reader_line (reader));
+    goto cleanup;
+  }
+  if (xtree_reader_cpos (reader) != cposs[2] + 1) {
+    PERROR ("Expected cpos %zu at the end, got %zu\n",
+            cposs[2] + 1, xtree_reader_cpos (reader));
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_unget_whitespace
+int test_reader_unget_whitespace (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+
+  reader = xtree_reader_str ("test", "a b\nc");
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  // Whitespace characters can be ungotten like any other, including a
+  // newline, which must restore the line number and character position.
+  if (!rdr_expect_get (reader, 'a'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, ' '))
+    goto cleanup;
+
+  xtree_reader_unget (reader);
+  if (xtree_reader_peek (reader) != ' ') {
+    PERROR ("Peek after unget should return the ungotten space\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_get (reader, ' '))
+    goto cleanup;
+  if (!rdr_expect_get (reader, 'b'))
+    goto cleanup;
+
+  size_t line = xtree_reader_line (reader);
+  size_t cpos = xtree_reader_cpos (reader);
+
+  if (!rdr_expect_get (reader, '\n'))
+    goto cleanup;
+  if (xtree_reader_line (reader) != line + 1) {
+    PERROR ("Newline should advance the line to %zu, got %zu\n",
+            line + 1, xtree_reader_line (reader));
+    goto cleanup;
+  }
+
+  xtree_reader_unget (reader);
+  if (xtree_reader_line (reader) != line ||
+      xtree_reader_cpos (reader) != cpos) {
+    PERROR ("Unget of newline should restore line %zu cpos %zu, "
+            "got line %zu cpos %zu\n", line, cpos,
+            xtree_reader_line (reader), xtree_reader_cpos (reader));
+    goto cleanup;
+  }
+  if (!rdr_expect_get (reader, '\n'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, 'c'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_high_bytes
+int test_reader_high_bytes (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+
+  // Bytes with the high bit set (as found in UTF-8 text) must be returned
+  // as values in the range 0..255, never as negative values. In
+  // particular, a 0xFF byte must not be confused with EOF.
+  static const char input[] = {
+    (char)0xff, (char)0xc3, (char)0xa9, (char)0x80, 'z', '\0'
+  };
+  static const int expected[] = { 0xff, 0xc3, 0xa9, 0x80, 'z' };
+
+  reader = xtree_reader_str ("test", input);
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  for (size_t i=0; i<sizeof expected / sizeof expected[0]; i++) {
+    int p = xtree_reader_peek (reader);
+    if (p != expected[i]) {
+      PERROR ("Character %zu: expected peek to return [%i], got [%i]\n",
+              i, expected[i], p);
+      goto cleanup;
+    }
+    if (!rdr_expect_get (reader, expected[i]))
+      goto cleanup;
+    if (!rdr_expect_noerror (reader))
+      goto cleanup;
+  }
+
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_unget_after_eof
+int test_reader_unget_after_eof (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+  xtree_reader_t *empty = NULL;
+
+  reader = xtree_reader_str ("test", "ab");
+  empty = xtree_reader_str ("test", "");
+  if (!reader || !empty) {
+    PERROR ("Failed to create readers\n");
+    goto cleanup;
+  }
+
+  if (!rdr_expect_get (reader, 'a'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, 'b'))
+    goto cleanup;
+
+  size_t line = xtree_reader_line (reader);
+  size_t cpos = xtree_reader_cpos (reader);
+
+  // A get that returns EOF consumed nothing, so unget must not give back
+  // a character: the next get must return EOF again and the position
+  // must be unchanged.
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+  // A get after seeing EOF must do nothing; we should be able to call get
+  // repeatedly and expect EOF on each call.
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+
+
+  // This ungets "b", setting the character position to 1
+  xtree_reader_unget (reader);
+
+  if (xtree_reader_line (reader) != line ||
+      xtree_reader_cpos (reader) != cpos) {
+    PERROR ("Unget after EOF changed the position: expected line %zu cpos "
+            "%zu, got line %zu cpos %zu\n", line, cpos,
+            xtree_reader_line (reader), xtree_reader_cpos (reader));
+    goto cleanup;
+  }
+  if (xtree_reader_peek (reader) != EOF) {
+    PERROR ("Peek after unget at EOF should still return EOF\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+
+  // The same holds for input that is empty to begin with.
+  line = xtree_reader_line (empty);
+  cpos = xtree_reader_cpos (empty);
+
+  if (!rdr_expect_get (empty, EOF))
+    goto cleanup;
+  xtree_reader_unget (empty);
+  if (!rdr_expect_get (empty, EOF))
+    goto cleanup;
+  if (xtree_reader_line (empty) != line ||
+      xtree_reader_cpos (empty) != cpos) {
+    PERROR ("Unget after EOF on empty input changed the position\n");
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  xtree_reader_free (&empty);
+  return ret;
+}
+
+// name: test_reader_input_copied
+int test_reader_input_copied (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+  char buf[] = "abc";
+
+  reader = xtree_reader_str ("test", buf);
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  // The reader owns a copy, so mutating the caller's buffer afterwards
+  // must not affect what the reader returns.
+  memset (buf, 'Z', sizeof buf - 1);
+
+  if (!rdr_expect_get (reader, 'a'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, 'b'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, 'c'))
+    goto cleanup;
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_independent_readers
+int test_reader_independent_readers (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *r1 = NULL;
+  xtree_reader_t *r2 = NULL;
+
+  r1 = xtree_reader_str ("one", "abc");
+  r2 = xtree_reader_str ("two", "abc");
+  if (!r1 || !r2) {
+    PERROR ("Failed to create readers\n");
+    goto cleanup;
+  }
+
+  size_t start = xtree_reader_cpos (r2);
+
+  if (!rdr_expect_get (r1, 'a'))
+    goto cleanup;
+  if (!rdr_expect_get (r1, 'b'))
+    goto cleanup;
+
+  // r2 must be unaffected by reads on r1.
+  if (xtree_reader_cpos (r2) != start) {
+    PERROR ("Reading from one reader changed the position of another\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_get (r2, 'a'))
+    goto cleanup;
+  if (!rdr_expect_get (r1, 'c'))
+    goto cleanup;
+  if (!rdr_expect_get (r2, 'b'))
+    goto cleanup;
+
+  // Freeing one must not disturb the other.
+  xtree_reader_free (&r1);
+  if (!rdr_expect_get (r2, 'c'))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&r1);
+  xtree_reader_free (&r2);
+  return ret;
+}
+
+// name: test_reader_error_none_on_success
+int test_reader_error_none_on_success (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+  const struct xtree_errobj_t *err = NULL;
+
+  reader = xtree_reader_str ("test", "a b\nc");
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  // No error object on a fresh reader...
+  err = xtree_reader_error (reader);
+  if (err != NULL) {
+    PERROR ("Fresh reader should return a NULL error object\n");
+    rdr_print_errobj (err);
+    goto cleanup;
+  }
+
+  // ...nor after any of the normal operations.
+  if (!rdr_expect_get (reader, 'a'))
+    goto cleanup;
+  if (!rdr_expect_noerror (reader))
+    goto cleanup;
+
+  if (xtree_reader_peek (reader) != ' ') {
+    PERROR ("Peek should return the space\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_noerror (reader))
+    goto cleanup;
+
+  // Unget requires a preceding get, which was done above.
+  xtree_reader_unget (reader);
+  if (!rdr_expect_noerror (reader))
+    goto cleanup;
+
+  while (xtree_reader_get (reader) != EOF)
+    ;
+  if (!rdr_expect_noerror (reader))
+    goto cleanup;
+
+  // Neither does reading again after EOF.
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+  if (!rdr_expect_noerror (reader))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_error_query_idempotent
+int test_reader_error_query_idempotent (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+
+  reader = xtree_reader_str ("test", "ab");
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  if (!rdr_expect_get (reader, 'a'))
+    goto cleanup;
+
+  size_t line = xtree_reader_line (reader);
+  size_t cpos = xtree_reader_cpos (reader);
+
+  // Querying the error (any number of times) is a pure read: it must
+  // not change the result of the query or the position of the reader.
+  for (size_t i=0; i<3; i++) {
+    if (!rdr_expect_noerror (reader))
+      goto cleanup;
+  }
+
+  if (xtree_reader_line (reader) != line ||
+      xtree_reader_cpos (reader) != cpos) {
+    PERROR ("Querying the error must not change the reader position\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_get (reader, 'b'))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_reader_error_null_reader
+int test_reader_error_null_reader (void)
+{
+  // A NULL reader must be handled without crashing. What it reports is
+  // up to the library: either NULL, or a well-formed error object.
+  const struct xtree_errobj_t *err = xtree_reader_error (NULL);
+  if (err && !rdr_expect_wellformed_errobj (err))
+    return EXIT_FAILURE;
+
+  return EXIT_SUCCESS;
+}
+
+// name: test_reader_roundtrip
+int test_reader_roundtrip (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+  static const char *input = "foo bar\n  baz\tqux\n";
+  char out[64];
+  size_t n = 0;
+  int c;
+
+  // The reader reproduces its input exactly.
+  reader = xtree_reader_str ("test", input);
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  while ((c = xtree_reader_get (reader)) != EOF) {
+    if (n + 1 >= sizeof out) {
+      PERROR ("Reader returned more characters than the input holds\n");
+      goto cleanup;
+    }
+    out[n++] = (char)c;
+  }
+  out[n] = '\0';
+
+  if (strcmp (out, input) != 0) {
+    PERROR ("Roundtrip mismatch, got [%s]\n", out);
+    goto cleanup;
+  }
+  if (!xtree_reader_eof (reader)) {
+    PERROR ("Reader should be at EOF after the roundtrip\n");
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+/* ------------------------------------------------------------------
+ * Tests for xtree_reader_file()
+ *
+ * Assumptions:
+ *   - xtree_reader_file() does NOT take ownership of the FILE*: the test
+ *     closes it itself, after freeing the reader.
+ *   - The FILE* stays open for the whole life of the reader (the reader
+ *     may read lazily).
+ *   - Behaviour must be identical to xtree_reader_str() for the same data.
+ *
+ * Add to the includes:   (nothing new; fdump() already pulls in what we need)
+ * Add to the TEST list:  test_reader_file_basic,
+ *                        test_reader_file_large,
+ *                        test_reader_file_null_input
+ * ------------------------------------------------------------------ */
+
+/* Write `len` bytes of `data` to a new temporary file (using fdump() for
+ * the name), close it, and return the filename in *dst_fname (caller
+ * must remove() and free() it). Returns true on success. */
+static bool rdr_write_tmpfile (const char *data, size_t len, char **dst_fname)
+{
+  FILE *outf = NULL;
+  char *fname = NULL;
+
+  if (!fdump (&fname, &outf)) {
+    PERROR ("Failed to create temporary file\n");
+    return false;
+  }
+
+  if (len && fwrite (data, 1, len, outf) != len) {
+    PERROR ("Failed to write test data to [%s]\n", fname);
+    fclose (outf);
+    remove (fname);
+    free (fname);
+    return false;
+  }
+
+  if (fclose (outf) != 0) {
+    PERROR ("Failed to close [%s]\n", fname);
+    remove (fname);
+    free (fname);
+    return false;
+  }
+
+  *dst_fname = fname;
+  return true;
+}
+
+// name: test_reader_file_basic
+int test_reader_file_basic (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+  char *fname = NULL;
+  FILE *inf = NULL;
+
+  /* Includes whitespace, blank lines and high bytes (0xff must not be
+   * confused with EOF). */
+  static const char data[] = { 'a', 'b', '\n', 'c', ' ', '\n', '\n',
+                               (char)0xff, '\t', 'z' };
+  static const int expected[] = { 'a', 'b', '\n', 'c', ' ', '\n', '\n',
+                                  0xff, '\t', 'z' };
+  static const size_t n = sizeof expected / sizeof expected[0];
+
+  if (!rdr_write_tmpfile (data, sizeof data, &fname))
+    goto cleanup;
+
+  inf = fopen (fname, "rb");
+  if (!inf) {
+    PERROR ("Failed to reopen [%s] for reading\n", fname);
+    goto cleanup;
+  }
+
+  reader = xtree_reader_file ("test", inf);
+  if (!reader) {
+    PERROR ("Failed to create reader from file\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_noerror (reader))
+    goto cleanup;
+  if (xtree_reader_eof (reader)) {
+    PERROR ("Reader over a non-empty file must not start at EOF\n");
+    goto cleanup;
+  }
+
+  size_t line0 = xtree_reader_line (reader);
+  size_t cpos0 = xtree_reader_cpos (reader);
+  size_t nl = 0;
+
+  for (size_t i=0; i<n; i++) {
+    // peek must agree with get and must not move the position
+    size_t line = xtree_reader_line (reader);
+    size_t cpos = xtree_reader_cpos (reader);
+    int p = xtree_reader_peek (reader);
+    if (p != expected[i]) {
+      PERROR ("Character %zu: expected peek [%i], got [%i]\n",
+              i, expected[i], p);
+      goto cleanup;
+    }
+    if (xtree_reader_line (reader) != line ||
+        xtree_reader_cpos (reader) != cpos) {
+      PERROR ("Peek changed the position at character %zu\n", i);
+      goto cleanup;
+    }
+
+    if (!rdr_expect_get (reader, expected[i]))
+      goto cleanup;
+    if (expected[i] == '\n')
+      nl++;
+
+    // unget/get round trip restores and then reproduces the position
+    xtree_reader_unget (reader);
+    if (xtree_reader_line (reader) != line ||
+        xtree_reader_cpos (reader) != cpos) {
+      PERROR ("Unget did not restore the position at character %zu\n", i);
+      goto cleanup;
+    }
+    if (!rdr_expect_get (reader, expected[i]))
+      goto cleanup;
+
+    if (!rdr_expect_noerror (reader))
+      goto cleanup;
+  }
+
+  // Line/cpos after consuming everything: three newlines were read, and
+  // the last line holds 0xff, '\t', 'z'.
+  if (xtree_reader_line (reader) != line0 + nl) {
+    PERROR ("Expected line %zu at the end, got %zu\n",
+            line0 + nl, xtree_reader_line (reader));
+    goto cleanup;
+  }
+  if (xtree_reader_cpos (reader) != cpos0 + 3) {
+    PERROR ("Expected cpos %zu at the end, got %zu\n",
+            cpos0 + 3, xtree_reader_cpos (reader));
+    goto cleanup;
+  }
+
+  // EOF, and it is sticky and not an error.
+  if (xtree_reader_peek (reader) != EOF) {
+    PERROR ("Peek at the end of the file should return EOF\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+  if (!xtree_reader_eof (reader)) {
+    PERROR ("Reader should report EOF after reading the whole file\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+  if (!rdr_expect_noerror (reader))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  if (inf)
+    fclose (inf);
+  if (fname) {
+    remove (fname);
+    free (fname);
+  }
+  return ret;
+}
+
+// name: test_reader_file_large
+int test_reader_file_large (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+  char *fname = NULL;
+  char *data = NULL;
+  FILE *inf = NULL;
+
+  /* Larger than any plausible internal buffer, so that refills are
+   * exercised. Every 80th byte is a newline. */
+  const size_t len = 100000;
+  size_t nl = 0;
+
+  data = malloc (len);
+  if (!data) {
+    PERROR ("Failed to allocate test data\n");
+    goto cleanup;
+  }
+  for (size_t i=0; i<len; i++) {
+    if (i % 80 == 79) {
+      data[i] = '\n';
+      nl++;
+    } else {
+      data[i] = (char)('a' + (i % 26));
+    }
+  }
+
+  if (!rdr_write_tmpfile (data, len, &fname))
+    goto cleanup;
+
+  inf = fopen (fname, "rb");
+  if (!inf) {
+    PERROR ("Failed to reopen [%s] for reading\n", fname);
+    goto cleanup;
+  }
+
+  reader = xtree_reader_file ("test", inf);
+  if (!reader) {
+    PERROR ("Failed to create reader from file\n");
+    goto cleanup;
+  }
+
+  size_t line0 = xtree_reader_line (reader);
+
+  for (size_t i=0; i<len; i++) {
+    int c = xtree_reader_get (reader);
+    if (c != (unsigned char)data[i]) {
+      PERROR ("Byte %zu: expected [%i], got [%i]\n",
+              i, (unsigned char)data[i], c);
+      goto cleanup;
+    }
+    // Exercise unget across (likely) buffer boundaries too.
+    if (i % 4093 == 0) {
+      xtree_reader_unget (reader);
+      if (!rdr_expect_get (reader, (unsigned char)data[i]))
+        goto cleanup;
+    }
+  }
+
+  if (xtree_reader_line (reader) != line0 + nl) {
+    PERROR ("Expected line %zu at the end, got %zu\n",
+            line0 + nl, xtree_reader_line (reader));
+    goto cleanup;
+  }
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+  if (!xtree_reader_eof (reader)) {
+    PERROR ("Reader should be at EOF after reading the whole file\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_noerror (reader))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  if (inf)
+    fclose (inf);
+  if (fname) {
+    remove (fname);
+    free (fname);
+  }
+  free (data);
+  return ret;
+}
+
+// name: test_reader_file_null_input
+int test_reader_file_null_input (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+  char *fname = NULL;
+  FILE *inf = NULL;
+
+  // A NULL FILE* must be rejected.
+  reader = xtree_reader_file ("test", NULL);
+  if (reader != NULL) {
+    PERROR ("Creating a reader from a NULL FILE* should return NULL\n");
+    goto cleanup;
+  }
+
+  // An empty file is valid input and yields immediate EOF, no error.
+  if (!rdr_write_tmpfile ("", 0, &fname))
+    goto cleanup;
+  inf = fopen (fname, "rb");
+  if (!inf) {
+    PERROR ("Failed to reopen [%s] for reading\n", fname);
+    goto cleanup;
+  }
+  reader = xtree_reader_file ("test", inf);
+  if (!reader) {
+    PERROR ("Failed to create reader from an empty file\n");
+    goto cleanup;
+  }
+  if (xtree_reader_peek (reader) != EOF) {
+    PERROR ("Peek on an empty file should return EOF\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_get (reader, EOF))
+    goto cleanup;
+  if (!xtree_reader_eof (reader)) {
+    PERROR ("Reader should report EOF on an empty file\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_noerror (reader))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  if (inf)
+    fclose (inf);
+  if (fname) {
+    remove (fname);
+    free (fname);
+  }
+  return ret;
+}
+
+
+
+
+
 int main (void)
 {
   int errcount = 0;
@@ -2215,6 +3626,35 @@ int main (void)
     TEST (test_parent_err_only_on_error),
     TEST (test_node_dump),
     TEST (test_child_append_reparents),
+    /* Tests for xtree_reader_t */
+    TEST (test_reader_create_free),
+    TEST (test_reader_free_null_safety),
+    TEST (test_reader_str_null_input),
+    TEST (test_reader_empty_input),
+    TEST (test_reader_get_sequence),
+    TEST (test_reader_eof_transitions),
+    TEST (test_reader_peek_no_advance),
+    TEST (test_reader_whitespace_returned),
+    TEST (test_reader_whitespace_only_input),
+    TEST (test_reader_peek_whitespace),
+    TEST (test_reader_line_tracking),
+    TEST (test_reader_cpos_tracking),
+    TEST (test_reader_unget_basic),
+    TEST (test_reader_unget_repeated_cycles),
+    TEST (test_reader_unget_restores_position),
+    TEST (test_reader_unget_whitespace),
+    TEST (test_reader_high_bytes),
+    TEST (test_reader_unget_after_eof),
+    TEST (test_reader_input_copied),
+    TEST (test_reader_independent_readers),
+    TEST (test_reader_error_none_on_success),
+    TEST (test_reader_error_query_idempotent),
+    TEST (test_reader_error_null_reader),
+    TEST (test_reader_roundtrip),
+    /* FILE tests */
+    TEST (test_reader_file_basic),
+    TEST (test_reader_file_large),
+    TEST (test_reader_file_null_input),
   };
 #undef TEST
 
