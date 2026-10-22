@@ -28,7 +28,7 @@ it will even be possible to represent programming source code).
 
 # Sample: Option `Intelligent`
 Both parsing and tokenisation logic live in the adaptor function.
-```c
+```
 
 bool adaptor_func (libctx_t *ctx, xtree_rxer_t *rxer)
 {
@@ -56,7 +56,7 @@ bool adaptor_func (libctx_t *ctx, xtree_rxer_t *rxer)
 
 # Sample: Option `Dumb`
 The adaptor does scanning only, producing tokens.
-```c
+```
 
 bool xtree_parse (adaptor_parser_t *fptr)
 {
@@ -95,3 +95,35 @@ struct {
 ```
 
 The input to the parsing function would be `getc` and `ungetc` type functions.
+
+
+
+**MAYBE**: Separate the tokenisation and parsing. From a practical PoV, we
+could have `json_scanner.c`, which implements a `scan_next()` function. This
+will return `{ token_type, token_text }` tuples. A `json_parser()` function
+can then collect tokens and issue the xtree functions to update the current
+node (which also includes adding children and descending into those children).
+
+
+# Simple
+The majority of trees I have in mind can be handled simply; anything that
+cannot be handled by the `xtree_parse()` function must be custom-written.
+
+1. A `reader_t` or `scanner_t` datatype (provide get/ungetc, and track line
+   number, character position, etc).
+2. A `token_t` datatype, with enum + text.
+3. Interface contract (function pointer type) for `scan` or `tokenise`
+   function:
+   `bool (tokenise_t) (reader_t *input, token_t *dst)`
+4. Interface contract (function pointer type) for `parse` function:
+   `event_t *(parse_t) (parser_t *parser, reader_t *input, tokenise_t *fptr)`
+5. An xtree function `xtree_parse()` that takes a `parse_t` function, and
+   input, and returns an xtree, using the events returned by the `parse_t`
+   function to construct the tree. Only a single tree is constructed at a
+   time.
+
+*Example:* Wrapper defines `json_tokenise()`, which returns the next `token_t`
+from `reader_t *input`. Wrapper defines `parse_t *json_parse`, which calls
+`json_tokenise()` internally. The `json_parse` function is passed to the xtree
+parse function `xrtee_parse()`, along with an initialised `reader_t`.
+
