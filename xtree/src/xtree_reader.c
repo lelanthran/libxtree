@@ -16,8 +16,8 @@ static unsigned char *fslurp (FILE *inf)
   bool error = true;
   unsigned char *ret = NULL;
   size_t retlen = 0;
-// #define BUFSIZE   (1024 * 1024)
-#define BUFSIZE   (2)
+#define BUFSIZE   (1024 * 1024)
+// #define BUFSIZE   (2)
   unsigned char *buf = NULL;
   size_t nbytes = 0;
   unsigned char *tmp = NULL;
@@ -99,6 +99,11 @@ void xtree_reader_free (xtree_reader_t **reader)
   xtree_errobj_reset (&r->err, 0);
   free (r);
   *reader = NULL;
+}
+
+const char *xtree_reader_name (const xtree_reader_t *reader)
+{
+  return reader ? reader->name : NULL;
 }
 
 const struct xtree_errobj_t *xtree_reader_error (const xtree_reader_t *reader)

@@ -14,6 +14,8 @@
 #include "xtree_err.h"
 #include "xtree.h"
 #include "xtree_reader.h"
+#include "xtree_scan.h"
+#include "xtree_json_scan.h"
 
 
 #define PERROR(...)   do { \
@@ -3577,6 +3579,1452 @@ cleanup:
 
 
 
+/* ------------------------------------------------------------------
+ * Tests for xtree_json_scan()
+ *
+ * This scanner is a lenient, JSON-like tokeniser (see xtree_json_scan.h):
+ *
+ *   - Every call returns a token. EOF (id 0) is returned at the end of the
+ *     input, repeatedly if the scanner is called again. ERROR (id
+ *     -1) is returned only for a string that is not terminated
+ *     before the end of the input. EOF and ERROR have "" as their text.
+ *   - Token text is the raw source text. The one exception is inside
+ *     strings: a literal LF is returned as the two characters \n and a
+ *     literal CR as \r (so CRLF is returned as \r\n). Escape sequences in
+ *     strings are never decoded or validated, whatever they are.
+ *   - It tokenises only; it does not check the JSON grammar. Trailing
+ *     commas, "}{" and "1 2" all scan without complaint.
+ *   - Whitespace is space, tab, CR and LF. It is skipped between tokens.
+ *   - "//" starts a comment (anywhere outside a string) that runs to the
+ *     end of the line. The comment token's text includes the "//" and
+ *     excludes the line terminator (LF, and a CR directly before it).
+ *   - Anything else is a "word": a run of characters up to whitespace,
+ *     one of { } [ ] : , a double quote, or "//". The whole word is
+ *     classified: a valid number is NUMBER (sign, decimal with optional
+ *     fraction/exponent, ".5" and "5." included, 0x hex, 0b binary,
+ *     leading-0 octal); true/false/null/Infinity/+Infinity/-Infinity/NaN/
+ *     undefined are their own tokens; everything else is a SYMBOL. So
+ *     "0x1abc" is one NUMBER but "1abc", "truex" and "08" are SYMBOLs.
+ *
+ * Assumptions I had to make (adjust the tables if the library differs):
+ *
+ *   - Token line/cpos is the position of the token's FIRST character.
+ *     As in the reader tests, the absolute origin (0- or 1-based) is not
+ *     assumed: positions are expressed relative to the reader's starting
+ *     line()/cpos(). The reader resets cpos on '\n', so cpos offsets are
+ *     relative to the start of the line even on later lines. '\r' is an
+ *     ordinary character that advances cpos. A string that spans lines
+ *     keeps the position of its opening quote, and the next token is
+ *     positioned after it on the reader's current line.
+ *   - The EOF token's position is the reader's position at the end of
+ *     the input (after any trailing whitespace has been skipped).
+ *   - An ERROR token's line/cpos is the reader's position at the end of
+ *     the input (where the missing closing quote was expected).
+ *   - After an ERROR token, xtree_reader_error() returns a well-formed
+ *     error object; otherwise it returns NULL.
+ *   - Whitespace other than the four above (form feed, vertical tab, NBSP)
+ *     is not whitespace: it is an ordinary word character.
+ *   - Letter case matters: True, NULL, infinity and Undefined are SYMBOLs.
+ *     +NaN, -NaN and -undefined are SYMBOLs too.
+ *   - A backslash followed directly by a literal LF inside a string is
+ *     not tested (the result of rewriting it is ambiguous).
+ *   - Nothing is asserted about what the scanner does after an ERROR
+ *     token.
+ * ------------------------------------------------------------------ */
+
+#define JSN_NAME "test.json"
+
+/* Marks an expected position as "wherever the reader is after the scan
+ * call"; used for the EOF token. */
+#define JSN_AT_READER ((size_t)-1)
+
+struct jsn_exp {
+  int id;
+  const char *text;
+  size_t line;    /* offset from the reader's starting line() */
+  size_t cpos;    /* offset from the reader's starting cpos() */
+};
+
+#define JSN_T(id, text, line, cpos)  { (int)(id), (text), (line), (cpos) }
+#define JSN_N(a)  (sizeof (a) / sizeof (a)[0])
+
+static const char *jsn_idname (int id)
+{
+  switch (id) {
+    case xtree_json_token_EOF:      return "EOF";
+    case xtree_json_token_LBRACE:   return "LBRACE";
+    case xtree_json_token_RBRACE:   return "RBRACE";
+    case xtree_json_token_LBRACKET: return "LBRACKET";
+    case xtree_json_token_RBRACKET: return "RBRACKET";
+    case xtree_json_token_COLON:    return "COLON";
+    case xtree_json_token_COMMA:    return "COMMA";
+    case xtree_json_token_STRING:   return "STRING";
+    case xtree_json_token_NUMBER:   return "NUMBER";
+    case xtree_json_token_TRUE:     return "TRUE";
+    case xtree_json_token_FALSE:    return "FALSE";
+    case xtree_json_token_NULL:     return "NULL";
+    case xtree_json_token_COMMENT:  return "COMMENT";
+    case xtree_json_token_SYMBOL:   return "SYMBOL";
+    case xtree_json_token_INFINITY: return "INFINITY";
+    case xtree_json_token_NEG_INFINITY: return "NEG_INFINITY";
+    case xtree_json_token_NAN:      return "NAN";
+    case xtree_json_token_UNDEFINED: return "UNDEFINED";
+    case xtree_json_token_ERROR:    return "ERROR";
+    default:                        return "(unknown id)";
+  }
+}
+
+/* Scan one token from the reader and check its id, text, filename,
+ * position and the reader's error state. `line` and `cpos` are absolute
+ * (JSN_AT_READER for both means "the reader's position after the call").
+ * The token is freed. Returns true if everything matched. */
+static bool jsn_check_token (xtree_reader_t *reader, int id,
+                             const char *text, size_t line, size_t cpos)
+{
+  bool ok = false;
+  xtree_scan_token_t *tok = xtree_json_scan (reader);
+
+  if (!tok) {
+    PERROR ("Scanner returned NULL, expected a [%s] token\n",
+            jsn_idname (id));
+    return false;
+  }
+
+  if (line == JSN_AT_READER) {
+    line = xtree_reader_line (reader);
+    cpos = xtree_reader_cpos (reader);
+  }
+
+  int gid = xtree_scan_token_id (tok);
+  const char *gtext = xtree_scan_token_text (tok);
+  const char *gname = xtree_scan_token_filename (tok);
+  size_t gline = xtree_scan_token_line (tok);
+  size_t gcpos = xtree_scan_token_cpos (tok);
+
+  if (gid != id) {
+    PERROR ("Expected token [%s], got [%s] with text [%.80s]\n",
+            jsn_idname (id), jsn_idname (gid), gtext ? gtext : "(null)");
+    goto cleanup;
+  }
+  if (!gtext || strcmp (gtext, text) != 0) {
+    PERROR ("[%s]: expected text [%.80s], got [%.80s]\n", jsn_idname (id),
+            text, gtext ? gtext : "(null)");
+    goto cleanup;
+  }
+  if (!gname || strcmp (gname, JSN_NAME) != 0) {
+    PERROR ("[%s]: expected filename [%s], got [%s]\n", jsn_idname (id),
+            JSN_NAME, gname ? gname : "(null)");
+    goto cleanup;
+  }
+  if (gline != line || gcpos != cpos) {
+    PERROR ("[%s] text [%.80s]: expected line %zu cpos %zu, got line %zu "
+            "cpos %zu\n", jsn_idname (id), text, line, cpos, gline, gcpos);
+    goto cleanup;
+  }
+
+  if (id == xtree_json_token_ERROR) {
+    if (!rdr_expect_wellformed_errobj (xtree_reader_error (reader)))
+      goto cleanup;
+  } else {
+    if (!rdr_expect_noerror (reader))
+      goto cleanup;
+  }
+
+  ok = true;
+
+cleanup:
+  xtree_scan_token_free (&tok);
+  return ok;
+}
+
+/* Check that the scanner is at the end of the input: it must return EOF
+ * (twice, because EOF is sticky) and the reader must report EOF. */
+static bool jsn_check_eof (xtree_reader_t *reader)
+{
+  for (size_t i=0; i<2; i++) {
+    if (!jsn_check_token (reader, xtree_json_token_EOF, "",
+                          JSN_AT_READER, JSN_AT_READER))
+      return false;
+  }
+  if (!xtree_reader_eof (reader)) {
+    PERROR ("Reader should be at EOF after the EOF token\n");
+    return false;
+  }
+  return true;
+}
+
+/* Scan `input` and check that it produces exactly the n tokens in `want`
+ * followed by EOF. If the last expected token is an ERROR, nothing after
+ * it is checked. Positions in `want` are relative to the reader's
+ * starting position. */
+static bool jsn_run (const char *input, const struct jsn_exp *want, size_t n)
+{
+  bool ok = false;
+  xtree_reader_t *reader = xtree_reader_str (JSN_NAME, input);
+
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    return false;
+  }
+
+  size_t line0 = xtree_reader_line (reader);
+  size_t cpos0 = xtree_reader_cpos (reader);
+
+  for (size_t i=0; i<n; i++) {
+    if (!jsn_check_token (reader, want[i].id, want[i].text,
+                          line0 + want[i].line, cpos0 + want[i].cpos)) {
+      PERROR ("Token %zu of input [%.80s] was wrong\n", i, input);
+      goto cleanup;
+    }
+  }
+
+  if (!(n && want[n-1].id == xtree_json_token_ERROR)) {
+    if (!jsn_check_eof (reader)) {
+      PERROR ("Bad end of input [%.80s]\n", input);
+      goto cleanup;
+    }
+  }
+
+  ok = true;
+
+cleanup:
+  xtree_reader_free (&reader);
+  return ok;
+}
+
+/* Input that must produce a single ERROR token at (line, cpos). */
+struct jsn_bad_case {
+  const char *input;
+  size_t line;
+  size_t cpos;
+};
+
+static int jsn_run_bad_cases (const struct jsn_bad_case *cases, size_t n)
+{
+  int rc = EXIT_SUCCESS;
+  for (size_t i=0; i<n; i++) {
+    struct jsn_exp e = JSN_T (xtree_json_token_ERROR, "",
+                              cases[i].line, cases[i].cpos);
+    if (!jsn_run (cases[i].input, &e, 1))
+      rc = EXIT_FAILURE;
+  }
+  return rc;
+}
+
+/* Each input must be scanned as exactly one token of type `id` whose text
+ * is the input itself. Each is tried bare and padded with whitespace on
+ * both sides (the padding puts the token on the second line). */
+static int jsn_run_single_cases (int id, const char *const *inputs,
+                                 size_t n)
+{
+  int rc = EXIT_SUCCESS;
+  for (size_t i=0; i<n; i++) {
+    struct jsn_exp e = JSN_T (id, inputs[i], 0, 0);
+    if (!jsn_run (inputs[i], &e, 1))
+      rc = EXIT_FAILURE;
+
+    size_t sz = strlen (inputs[i]) + 16;
+    char *padded = malloc (sz);
+    if (!padded) {
+      PERROR ("Failed to allocate padded input\n");
+      rc = EXIT_FAILURE;
+      continue;
+    }
+    snprintf (padded, sz, " \t\r\n%s\n\r\t ", inputs[i]);
+    e.line = 1;
+    e.cpos = 0;
+    if (!jsn_run (padded, &e, 1))
+      rc = EXIT_FAILURE;
+    free (padded);
+  }
+  return rc;
+}
+
+// name: test_json_scan_eof_empty
+int test_json_scan_eof_empty (void)
+{
+  // No tokens: EOF straight away, at the starting position.
+  return jsn_run ("", NULL, 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+// name: test_json_scan_eof_whitespace_only
+int test_json_scan_eof_whitespace_only (void)
+{
+  static const char *const inputs[] = {
+    " ", "\t", "\r", "\n", " \t\r\n", "\n\n\n", "  \n\t", "\r\n\r\n",
+  };
+  int rc = EXIT_SUCCESS;
+  for (size_t i=0; i<JSN_N (inputs); i++) {
+    if (!jsn_run (inputs[i], NULL, 0))
+      rc = EXIT_FAILURE;
+  }
+  return rc;
+}
+
+// name: test_json_scan_punctuation_each
+int test_json_scan_punctuation_each (void)
+{
+  int rc = EXIT_SUCCESS;
+  static const struct { int id; const char *text; } p[] = {
+    { xtree_json_token_LBRACE,   "{" },
+    { xtree_json_token_RBRACE,   "}" },
+    { xtree_json_token_LBRACKET, "[" },
+    { xtree_json_token_RBRACKET, "]" },
+    { xtree_json_token_COLON,    ":" },
+    { xtree_json_token_COMMA,    "," },
+  };
+  for (size_t i=0; i<JSN_N (p); i++) {
+    if (jsn_run_single_cases (p[i].id, &p[i].text, 1) != EXIT_SUCCESS)
+      rc = EXIT_FAILURE;
+  }
+  return rc;
+}
+
+// name: test_json_scan_punctuation_sequence
+int test_json_scan_punctuation_sequence (void)
+{
+  static const struct jsn_exp want[] = {
+    JSN_T (xtree_json_token_LBRACE,   "{", 0, 0),
+    JSN_T (xtree_json_token_RBRACE,   "}", 0, 1),
+    JSN_T (xtree_json_token_LBRACKET, "[", 0, 2),
+    JSN_T (xtree_json_token_RBRACKET, "]", 0, 3),
+    JSN_T (xtree_json_token_COLON,    ":", 0, 4),
+    JSN_T (xtree_json_token_COMMA,    ",", 0, 5),
+  };
+  return jsn_run ("{}[]:,", want, JSN_N (want)) ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+// name: test_json_scan_punctuation_whitespace_separated
+int test_json_scan_punctuation_whitespace_separated (void)
+{
+  static const struct jsn_exp want[] = {
+    JSN_T (xtree_json_token_LBRACE,   "{", 0, 1),
+    JSN_T (xtree_json_token_RBRACE,   "}", 0, 3),
+    JSN_T (xtree_json_token_LBRACKET, "[", 0, 5),
+    JSN_T (xtree_json_token_RBRACKET, "]", 0, 7),
+    JSN_T (xtree_json_token_COLON,    ":", 0, 9),
+    JSN_T (xtree_json_token_COMMA,    ",", 0, 11),
+  };
+  return jsn_run (" { } [ ] : , ", want, JSN_N (want))
+    ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+// name: test_json_scan_grammar_agnostic
+int test_json_scan_grammar_agnostic (void)
+{
+  // The scanner only tokenises; it must not reject grammatically invalid
+  // token streams.
+  int rc = EXIT_SUCCESS;
+
+  static const struct jsn_exp backwards[] = {
+    JSN_T (xtree_json_token_RBRACE,   "}", 0, 0),
+    JSN_T (xtree_json_token_LBRACE,   "{", 0, 1),
+    JSN_T (xtree_json_token_RBRACKET, "]", 0, 2),
+    JSN_T (xtree_json_token_LBRACKET, "[", 0, 3),
+    JSN_T (xtree_json_token_COMMA,    ",", 0, 4),
+    JSN_T (xtree_json_token_COLON,    ":", 0, 5),
+  };
+  if (!jsn_run ("}{][,:", backwards, JSN_N (backwards)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp mixed[] = {
+    JSN_T (xtree_json_token_NUMBER, "1",   0, 0),
+    JSN_T (xtree_json_token_STRING, "\"a\"", 0, 2),
+    JSN_T (xtree_json_token_TRUE,   "true", 0, 6),
+    JSN_T (xtree_json_token_NULL,   "null", 0, 11),
+  };
+  if (!jsn_run ("1 \"a\" true null", mixed, JSN_N (mixed)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp double_comma[] = {
+    JSN_T (xtree_json_token_LBRACKET, "[", 0, 0),
+    JSN_T (xtree_json_token_NUMBER,   "1", 0, 1),
+    JSN_T (xtree_json_token_COMMA,    ",", 0, 2),
+    JSN_T (xtree_json_token_COMMA,    ",", 0, 3),
+    JSN_T (xtree_json_token_RBRACKET, "]", 0, 4),
+  };
+  if (!jsn_run ("[1,,]", double_comma, JSN_N (double_comma)))
+    rc = EXIT_FAILURE;
+
+  return rc;
+}
+
+// name: test_json_scan_literals_each
+int test_json_scan_literals_each (void)
+{
+  static const char *const t[] = { "true" };
+  static const char *const f[] = { "false" };
+  static const char *const n[] = { "null" };
+  int rc = EXIT_SUCCESS;
+
+  if (jsn_run_single_cases (xtree_json_token_TRUE, t, 1) != EXIT_SUCCESS)
+    rc = EXIT_FAILURE;
+  if (jsn_run_single_cases (xtree_json_token_FALSE, f, 1) != EXIT_SUCCESS)
+    rc = EXIT_FAILURE;
+  if (jsn_run_single_cases (xtree_json_token_NULL, n, 1) != EXIT_SUCCESS)
+    rc = EXIT_FAILURE;
+  return rc;
+}
+
+// name: test_json_scan_literals_sequence
+int test_json_scan_literals_sequence (void)
+{
+  static const struct jsn_exp want[] = {
+    JSN_T (xtree_json_token_TRUE,  "true",  0, 0),
+    JSN_T (xtree_json_token_FALSE, "false", 0, 5),
+    JSN_T (xtree_json_token_NULL,  "null",  0, 11),
+  };
+  return jsn_run ("true false null", want, JSN_N (want))
+    ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+// name: test_json_scan_literals_in_structure
+int test_json_scan_literals_in_structure (void)
+{
+  // Literals directly followed by punctuation, with no whitespace.
+  int rc = EXIT_SUCCESS;
+
+  static const struct jsn_exp arr[] = {
+    JSN_T (xtree_json_token_LBRACKET, "[",     0, 0),
+    JSN_T (xtree_json_token_TRUE,     "true",  0, 1),
+    JSN_T (xtree_json_token_COMMA,    ",",     0, 5),
+    JSN_T (xtree_json_token_FALSE,    "false", 0, 6),
+    JSN_T (xtree_json_token_COMMA,    ",",     0, 11),
+    JSN_T (xtree_json_token_NULL,     "null",  0, 12),
+    JSN_T (xtree_json_token_RBRACKET, "]",     0, 16),
+  };
+  if (!jsn_run ("[true,false,null]", arr, JSN_N (arr)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp obj[] = {
+    JSN_T (xtree_json_token_LBRACE, "{",     0, 0),
+    JSN_T (xtree_json_token_STRING, "\"k\"", 0, 1),
+    JSN_T (xtree_json_token_COLON,  ":",     0, 4),
+    JSN_T (xtree_json_token_TRUE,   "true",  0, 5),
+    JSN_T (xtree_json_token_RBRACE, "}",     0, 9),
+  };
+  if (!jsn_run ("{\"k\":true}", obj, JSN_N (obj)))
+    rc = EXIT_FAILURE;
+
+  return rc;
+}
+
+// name: test_json_scan_strings_valid
+int test_json_scan_strings_valid (void)
+{
+  // Each string is returned fully quoted with every escape left exactly
+  // as written. The C literals below are the raw JSON text.
+  static const char *const cases[] = {
+    "\"\"",                                   /* empty */
+    "\" \"",                                  /* just a space */
+    "\"abc\"",
+    "\"hello world\"",
+    "\"\\\"\"",                               /* "\""   */
+    "\"\\\\\"",                               /* "\\"   */
+    "\"a\\\\\"",                              /* "a\\"  escaped backslash
+                                                 right before the quote */
+    "\"\\\\n\"",                              /* "\\n"  backslash, then n */
+    "\"\\/\"",                                /* "\/"   */
+    "\"\\b\\f\\n\\r\\t\"",                    /* all the short escapes */
+    "\"\\u0041\"",
+    "\"\\u00e9\\u00E9\\uabcd\\uABCD\\u0000\"", /* hex case, \u0000 */
+    "\"\\uD83D\\uDE00\"",                     /* surrogate pair, raw */
+    "\"/\"",                                  /* unescaped solidus */
+    "\"'\"",                                  /* single quote */
+    "\"{}[]:,\"",                             /* structural characters */
+    "\"true false null 123\"",
+    "\"// not a comment\"",
+    "\"a//b\"",
+    "\"\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\"", /* UTF-8, raw bytes */
+    "\"\x7f\"",                               /* DEL */
+    "\"a\tb\"",                               /* literal tab stays literal */
+    "\"\x01\"",                               /* so do other controls */
+  };
+  return jsn_run_single_cases (xtree_json_token_STRING, cases, JSN_N (cases));
+}
+
+// name: test_json_scan_strings_sequence
+int test_json_scan_strings_sequence (void)
+{
+  int rc = EXIT_SUCCESS;
+
+  // A key/value pair, and two strings with nothing between them (the
+  // scanner does not require separators).
+  static const struct jsn_exp pair[] = {
+    JSN_T (xtree_json_token_STRING, "\"a\"", 0, 0),
+    JSN_T (xtree_json_token_COLON,  ":",     0, 3),
+    JSN_T (xtree_json_token_STRING, "\"b\"", 0, 4),
+  };
+  if (!jsn_run ("\"a\":\"b\"", pair, JSN_N (pair)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp adjacent[] = {
+    JSN_T (xtree_json_token_STRING, "\"a\"", 0, 0),
+    JSN_T (xtree_json_token_STRING, "\"b\"", 0, 3),
+  };
+  if (!jsn_run ("\"a\"\"b\"", adjacent, JSN_N (adjacent)))
+    rc = EXIT_FAILURE;
+
+  // "a\\" ends at the second quote, because the backslash before it is
+  // itself escaped; the comma and number after it are separate tokens.
+  static const struct jsn_exp escaped_backslash[] = {
+    JSN_T (xtree_json_token_STRING, "\"a\\\\\"", 0, 0),
+    JSN_T (xtree_json_token_COMMA,  ",",         0, 5),
+    JSN_T (xtree_json_token_NUMBER, "1",         0, 6),
+  };
+  if (!jsn_run ("\"a\\\\\",1", escaped_backslash, JSN_N (escaped_backslash)))
+    rc = EXIT_FAILURE;
+
+  // An escaped quote does not end the string.
+  static const struct jsn_exp escaped_quote[] = {
+    JSN_T (xtree_json_token_STRING, "\"a\\\",b\"", 0, 0),
+    JSN_T (xtree_json_token_COMMA,  ",",           0, 7),
+  };
+  if (!jsn_run ("\"a\\\",b\",", escaped_quote, JSN_N (escaped_quote)))
+    rc = EXIT_FAILURE;
+
+  return rc;
+}
+
+// name: test_json_scan_numbers_valid
+int test_json_scan_numbers_valid (void)
+{
+  // Returned as raw text; nothing is normalised ("1.0" stays "1.0",
+  // "1E10" stays "1E10", "-0" stays "-0", "0x1F" stays "0x1F").
+  static const char *const cases[] = {
+    /* decimal integers */
+    "0", "-0", "+0", "1", "-1", "+1", "9", "10", "123", "1234567890",
+    "-1234567890", "+1234567890",
+    "12345678901234567890123456789012345678901234567890",
+    /* fractions, including a missing integer or fraction part */
+    "0.5", "-0.5", "+0.5", ".5", "-.5", "+.5", "0.", "5.", "-5.",
+    "0.0", "-0.0", "1.0", "10.25", "0.1", "123.456",
+    /* exponents */
+    "1e10", "1E10", "1e+10", "1e-10", "1E+10", "1E-2", "1e0", "0e0",
+    "-0e-0", "0.0e+0", "0e1", "+1e1", "-1.5e+3", ".5e3", "1.e5",
+    "123.456E789", "1.7976931348623157e308", "5e-324", "1e999999",
+    /* hexadecimal */
+    "0x0", "0x1", "0xF", "0xff", "0XFF", "0xdeadBEEF", "0x1abc",
+    "-0x10", "+0x10", "0x0123456789abcdefABCDEF",
+    /* octal (a leading zero followed by octal digits) */
+    "00", "01", "07", "0777", "-017", "+07",
+    /* binary */
+    "0b0", "0b1", "0b1010", "0B11", "-0b1", "+0b1", "0b00001111",
+  };
+  return jsn_run_single_cases (xtree_json_token_NUMBER, cases, JSN_N (cases));
+}
+
+// name: test_json_scan_numbers_delimited
+int test_json_scan_numbers_delimited (void)
+{
+  // A number ends at the first character that cannot continue it.
+  int rc = EXIT_SUCCESS;
+
+  static const struct jsn_exp comma[] = {
+    JSN_T (xtree_json_token_NUMBER, "1", 0, 0),
+    JSN_T (xtree_json_token_COMMA,  ",", 0, 1),
+    JSN_T (xtree_json_token_NUMBER, "2", 0, 2),
+  };
+  if (!jsn_run ("1,2", comma, JSN_N (comma)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp list[] = {
+    JSN_T (xtree_json_token_LBRACKET, "[",   0, 0),
+    JSN_T (xtree_json_token_NUMBER,   "0",   0, 1),
+    JSN_T (xtree_json_token_COMMA,    ",",   0, 2),
+    JSN_T (xtree_json_token_NUMBER,   "-0",  0, 3),
+    JSN_T (xtree_json_token_COMMA,    ",",   0, 5),
+    JSN_T (xtree_json_token_NUMBER,   "0.5", 0, 6),
+    JSN_T (xtree_json_token_RBRACKET, "]",   0, 9),
+  };
+  if (!jsn_run ("[0,-0,0.5]", list, JSN_N (list)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp object[] = {
+    JSN_T (xtree_json_token_LBRACE, "{",        0, 0),
+    JSN_T (xtree_json_token_STRING, "\"a\"",    0, 1),
+    JSN_T (xtree_json_token_COLON,  ":",        0, 4),
+    JSN_T (xtree_json_token_NUMBER, "-1.5e+3",  0, 5),
+    JSN_T (xtree_json_token_RBRACE, "}",        0, 12),
+  };
+  if (!jsn_run ("{\"a\":-1.5e+3}", object, JSN_N (object)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp spaced[] = {
+    JSN_T (xtree_json_token_NUMBER, "1", 0, 0),
+    JSN_T (xtree_json_token_NUMBER, "2", 0, 2),
+    JSN_T (xtree_json_token_NUMBER, "3", 0, 4),
+  };
+  if (!jsn_run ("1 2 3", spaced, JSN_N (spaced)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp newline[] = {
+    JSN_T (xtree_json_token_NUMBER, "1", 0, 0),
+    JSN_T (xtree_json_token_NUMBER, "2", 1, 0),
+  };
+  if (!jsn_run ("1\n2", newline, JSN_N (newline)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp colon[] = {
+    JSN_T (xtree_json_token_NUMBER, "1", 0, 0),
+    JSN_T (xtree_json_token_COLON,  ":", 0, 1),
+    JSN_T (xtree_json_token_NUMBER, "2", 0, 2),
+  };
+  if (!jsn_run ("1:2", colon, JSN_N (colon)))
+    rc = EXIT_FAILURE;
+
+  // The word is classified as a whole: "0x1 abc" is a number and a symbol,
+  // while "0x1abc" (see test_json_scan_numbers_valid) is a single number.
+  static const struct jsn_exp hex_then_symbol[] = {
+    JSN_T (xtree_json_token_NUMBER, "0x1", 0, 0),
+    JSN_T (xtree_json_token_SYMBOL, "abc", 0, 4),
+  };
+  if (!jsn_run ("0x1 abc", hex_then_symbol, JSN_N (hex_then_symbol)))
+    rc = EXIT_FAILURE;
+
+  return rc;
+}
+
+// name: test_json_scan_whitespace_kinds
+int test_json_scan_whitespace_kinds (void)
+{
+  int rc = EXIT_SUCCESS;
+
+  // Tabs.
+  static const struct jsn_exp tabs[] = {
+    JSN_T (xtree_json_token_LBRACKET, "[", 0, 0),
+    JSN_T (xtree_json_token_NUMBER,   "1", 0, 2),
+    JSN_T (xtree_json_token_COMMA,    ",", 0, 3),
+    JSN_T (xtree_json_token_NUMBER,   "2", 0, 5),
+    JSN_T (xtree_json_token_RBRACKET, "]", 0, 7),
+  };
+  if (!jsn_run ("[\t1,\t2\t]", tabs, JSN_N (tabs)))
+    rc = EXIT_FAILURE;
+
+  // CRLF line endings: only '\n' starts a new line; '\r' is skipped like
+  // any other whitespace.
+  static const struct jsn_exp crlf[] = {
+    JSN_T (xtree_json_token_LBRACE, "{",     0, 0),
+    JSN_T (xtree_json_token_STRING, "\"a\"", 1, 2),
+    JSN_T (xtree_json_token_COLON,  ":",     1, 6),
+    JSN_T (xtree_json_token_NUMBER, "1",     2, 1),
+    JSN_T (xtree_json_token_RBRACE, "}",     3, 0),
+  };
+  if (!jsn_run ("{\r\n  \"a\" :\r\n 1\r\n}\r\n", crlf, JSN_N (crlf)))
+    rc = EXIT_FAILURE;
+
+  // A mix of everything, with blank lines and leading/trailing space.
+  static const struct jsn_exp mixed[] = {
+    JSN_T (xtree_json_token_LBRACKET, "[", 1, 1),
+    JSN_T (xtree_json_token_NUMBER,   "1", 3, 2),
+  };
+  if (!jsn_run (" \t\r\n [ \n\n  1 ", mixed, JSN_N (mixed)))
+    rc = EXIT_FAILURE;
+
+  return rc;
+}
+
+// name: test_json_scan_full_document
+int test_json_scan_full_document (void)
+{
+  static const char *const input =
+    "{\n"
+    "  \"name\": \"x\",\n"
+    "  \"list\": [1, 2.5, -3e2, true, false, null],\n"
+    "  \"obj\": {\"k\": \"v\\n\"}\n"
+    "}\n";
+
+  static const struct jsn_exp want[] = {
+    JSN_T (xtree_json_token_LBRACE,   "{",        0, 0),
+    JSN_T (xtree_json_token_STRING,   "\"name\"", 1, 2),
+    JSN_T (xtree_json_token_COLON,    ":",        1, 8),
+    JSN_T (xtree_json_token_STRING,   "\"x\"",    1, 10),
+    JSN_T (xtree_json_token_COMMA,    ",",        1, 13),
+    JSN_T (xtree_json_token_STRING,   "\"list\"", 2, 2),
+    JSN_T (xtree_json_token_COLON,    ":",        2, 8),
+    JSN_T (xtree_json_token_LBRACKET, "[",        2, 10),
+    JSN_T (xtree_json_token_NUMBER,   "1",        2, 11),
+    JSN_T (xtree_json_token_COMMA,    ",",        2, 12),
+    JSN_T (xtree_json_token_NUMBER,   "2.5",      2, 14),
+    JSN_T (xtree_json_token_COMMA,    ",",        2, 17),
+    JSN_T (xtree_json_token_NUMBER,   "-3e2",     2, 19),
+    JSN_T (xtree_json_token_COMMA,    ",",        2, 23),
+    JSN_T (xtree_json_token_TRUE,     "true",     2, 25),
+    JSN_T (xtree_json_token_COMMA,    ",",        2, 29),
+    JSN_T (xtree_json_token_FALSE,    "false",    2, 31),
+    JSN_T (xtree_json_token_COMMA,    ",",        2, 36),
+    JSN_T (xtree_json_token_NULL,     "null",     2, 38),
+    JSN_T (xtree_json_token_RBRACKET, "]",        2, 42),
+    JSN_T (xtree_json_token_COMMA,    ",",        2, 43),
+    JSN_T (xtree_json_token_STRING,   "\"obj\"",  3, 2),
+    JSN_T (xtree_json_token_COLON,    ":",        3, 7),
+    JSN_T (xtree_json_token_LBRACE,   "{",        3, 9),
+    JSN_T (xtree_json_token_STRING,   "\"k\"",    3, 10),
+    JSN_T (xtree_json_token_COLON,    ":",        3, 13),
+    JSN_T (xtree_json_token_STRING,   "\"v\\n\"", 3, 15),
+    JSN_T (xtree_json_token_RBRACE,   "}",        3, 20),
+    JSN_T (xtree_json_token_RBRACE,   "}",        4, 0),
+  };
+  return jsn_run (input, want, JSN_N (want)) ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+// name: test_json_scan_token_filename
+int test_json_scan_token_filename (void)
+{
+  // The filename on each token is the name the reader was created with.
+  // (jsn_check_token() checks JSN_NAME; this checks a different name, so a
+  // hard-coded filename in the scanner would be caught.)
+  int ret = EXIT_FAILURE;
+  static const char *const name = "dir/other-name.json";
+  xtree_reader_t *reader = xtree_reader_str (name, "[1]");
+  xtree_scan_token_t *tok = NULL;
+
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  for (size_t i=0; i<4; i++) {     /* '[', '1', ']', EOF */
+    tok = xtree_json_scan (reader);
+    if (!tok) {
+      PERROR ("Scanner returned NULL for token %zu\n", i);
+      goto cleanup;
+    }
+    const char *got = xtree_scan_token_filename (tok);
+    if (!got || strcmp (got, name) != 0) {
+      PERROR ("Token %zu: expected filename [%s], got [%s]\n",
+              i, name, got ? got : "(null)");
+      goto cleanup;
+    }
+    xtree_scan_token_free (&tok);
+    tok = NULL;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_scan_token_free (&tok);
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_json_scan_string_escapes_not_decoded
+int test_json_scan_string_escapes_not_decoded (void)
+{
+  // The scanner neither decodes nor validates escapes: whatever follows a
+  // backslash is kept as written, including sequences that are not valid
+  // JSON. Each text equals its input.
+  static const char *const cases[] = {
+    "\"\\q\"",
+    "\"\\x41\"",
+    "\"\\u\"",                    /* \u with no digits */
+    "\"\\u12\"",                  /* too few digits */
+    "\"\\u12G4\"",                /* non-hex digit */
+    "\"\\uXYZW\"",
+    "\"\\'\"",
+    "\"\\a\"",
+    "\"\\0\"",
+    "\"\\U0041\"",
+    "\"\\e\"",
+    "\"\\ \"",                    /* backslash space */
+    "\"\\\\q\"",                  /* escaped backslash, then q */
+    "\"\\n\"",                    /* the two characters \ and n */
+    "\"\\r\\n\"",
+    "\"C:\\\\dir\\file\"",
+    "\"\\u0041\\\\u0041\"",
+  };
+  return jsn_run_single_cases (xtree_json_token_STRING, cases, JSN_N (cases));
+}
+
+// name: test_json_scan_strings_multiline
+int test_json_scan_strings_multiline (void)
+{
+  // A string may contain literal newlines. In the returned text a literal
+  // LF becomes \n and a literal CR becomes \r, so CRLF becomes \r\n.
+  // Tabs, other characters and escapes already present are untouched.
+  int rc = EXIT_SUCCESS;
+
+  static const struct { const char *input; const char *text; } cases[] = {
+    { "\"a\nb\"",       "\"a\\nb\"" },
+    { "\"\n\"",         "\"\\n\"" },
+    { "\"\n\n\n\"",     "\"\\n\\n\\n\"" },
+    { "\"a\r\nb\"",     "\"a\\r\\nb\"" },
+    { "\"a\rb\"",       "\"a\\rb\"" },
+    { "\"\r\n\r\n\"",   "\"\\r\\n\\r\\n\"" },
+    { "\"a\tb\"",       "\"a\tb\"" },
+    { "\"a\n\tb\"",     "\"a\\n\tb\"" },
+    { "\"a\\nb\"",      "\"a\\nb\"" },         /* already escaped: as-is */
+    { "\"x\\n\ny\"",    "\"x\\n\\ny\"" },      /* escaped, then literal */
+    { "\"a\\\"\nb\"",   "\"a\\\"\\nb\"" },     /* escaped quote, then LF */
+    { "\"a\n// not\"",  "\"a\\n// not\"" },    /* not a comment */
+    { "\"{\n}\"",       "\"{\\n}\"" },
+    { "\"line one\nline two\nline three\"",
+      "\"line one\\nline two\\nline three\"" },
+  };
+  for (size_t i=0; i<JSN_N (cases); i++) {
+    struct jsn_exp e = JSN_T (xtree_json_token_STRING, cases[i].text, 0, 0);
+    if (!jsn_run (cases[i].input, &e, 1))
+      rc = EXIT_FAILURE;
+  }
+
+  // Positions: the string keeps the position of its opening quote, and
+  // the tokens after it are positioned on the line the reader is now on.
+  static const struct jsn_exp then_number[] = {
+    JSN_T (xtree_json_token_STRING, "\"a\\nb\"", 0, 0),
+    JSN_T (xtree_json_token_NUMBER, "1",         1, 3),
+  };
+  if (!jsn_run ("\"a\nb\" 1", then_number, JSN_N (then_number)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp in_array[] = {
+    JSN_T (xtree_json_token_LBRACKET, "[",             0, 0),
+    JSN_T (xtree_json_token_STRING,   "\"a\\r\\nb\"",  0, 1),
+    JSN_T (xtree_json_token_COMMA,    ",",             1, 2),
+    JSN_T (xtree_json_token_NUMBER,   "1",             2, 2),
+    JSN_T (xtree_json_token_RBRACKET, "]",             2, 3),
+  };
+  if (!jsn_run ("[\"a\r\nb\",\n  1]", in_array, JSN_N (in_array)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp then_comment[] = {
+    JSN_T (xtree_json_token_STRING,  "\"a\\n\"", 0, 0),
+    JSN_T (xtree_json_token_COMMENT, "// c",     1, 2),
+  };
+  if (!jsn_run ("\"a\n\" // c", then_comment, JSN_N (then_comment)))
+    rc = EXIT_FAILURE;
+
+  return rc;
+}
+
+// name: test_json_scan_symbols_single
+int test_json_scan_symbols_single (void)
+{
+  // Each input is one SYMBOL whose text is the input itself. Anything that
+  // is not whitespace, punctuation, a string, a comment, a number or one
+  // of the keyword tokens is a symbol, as is any word that merely starts
+  // like one of those.
+  static const char *const cases[] = {
+    /* ordinary identifiers */
+    "x", "SomeVar", "some_var", "_x", "x1", "ONE", "TWO)", "some-name",
+    "a.b.c", "$", "$(ONE)",
+    /* punctuation and operators that are not JSON */
+    "@", "#", "'x'", "<", "=", ";", "(", "\\", "*",
+    "/", "/x", "a/b", "/*", "*/",
+    /* keywords with the wrong case, or cut short, or extended */
+    "True", "TRUE", "False", "FALSE", "Null", "NULL",
+    "t", "tr", "tru", "f", "fals", "n", "nul", "nil",
+    "trux", "trUe", "fAlse", "nulL",
+    "truex", "falsey", "nullable", "trueish", "nullx",
+    "Undefined", "UNDEFINED", "undefinedx",
+    "infinity", "INFINITY", "Infinityx", "+Infinit", "-Infinity2",
+    "--Infinity", "++Infinity", "Infinity-",
+    "nan", "NAN", "NaNa", "+NaN", "-NaN", "-undefined", "+undefined",
+    /* things that look like numbers but are not numbers as a whole */
+    "1abc", "12px", "1e", "1E", "1e+", "1e-", "1e+x", "1.5e", "1.5.5",
+    "1.2.3", "1e5e5", "0.5.", "5..", "1_000", "2026-10-25", "1-2", "1+1",
+    "08", "09", "007e", "00.5", "01.5", "012e3", "0o17",
+    "0x", "0X", "0xg", "0x1g", "0x-1", "-0x", "0b", "0B", "0b2", "0b12",
+    "+0b",
+    /* signs and dots without digits */
+    "-", "+", "-a", "--1", "-+1", "+-1", ".", "..", "..5", ".e5", "-.",
+    "+.",
+    /* control characters and non-ASCII bytes are ordinary word characters
+     * (and form feed, vertical tab and NBSP are not whitespace) */
+    "\x01", "\x7f", "\f", "\v", "\xc2\xa0", "\xc3\xa9", "\xff",
+    "caf\xc3\xa9", "\xf0\x9f\x98\x80",
+  };
+  return jsn_run_single_cases (xtree_json_token_SYMBOL, cases, JSN_N (cases));
+}
+
+// name: test_json_scan_symbols_delimited
+int test_json_scan_symbols_delimited (void)
+{
+  // A word ends at whitespace, at { } [ ] : , at a double quote, and at
+  // "//". Symbols therefore never swallow JSON structure.
+  int rc = EXIT_SUCCESS;
+
+  static const struct jsn_exp parens[] = {
+    JSN_T (xtree_json_token_SYMBOL, "$(ONE", 0, 0),
+    JSN_T (xtree_json_token_SYMBOL, "TWO)",  0, 6),
+  };
+  if (!jsn_run ("$(ONE TWO)", parens, JSN_N (parens)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp brace[] = {
+    JSN_T (xtree_json_token_SYMBOL, "ONE", 0, 0),
+    JSN_T (xtree_json_token_LBRACE, "{",   0, 3),
+    JSN_T (xtree_json_token_SYMBOL, "TWO", 0, 4),
+  };
+  if (!jsn_run ("ONE{TWO", brace, JSN_N (brace)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp bracket[] = {
+    JSN_T (xtree_json_token_SYMBOL,   "a", 0, 0),
+    JSN_T (xtree_json_token_RBRACKET, "]", 0, 1),
+    JSN_T (xtree_json_token_SYMBOL,   "b", 0, 2),
+  };
+  if (!jsn_run ("a]b", bracket, JSN_N (bracket)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp unquoted_key[] = {
+    JSN_T (xtree_json_token_LBRACE, "{",   0, 0),
+    JSN_T (xtree_json_token_SYMBOL, "foo", 0, 1),
+    JSN_T (xtree_json_token_COLON,  ":",   0, 4),
+    JSN_T (xtree_json_token_NUMBER, "1",   0, 5),
+    JSN_T (xtree_json_token_RBRACE, "}",   0, 6),
+  };
+  if (!jsn_run ("{foo:1}", unquoted_key, JSN_N (unquoted_key)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp list[] = {
+    JSN_T (xtree_json_token_LBRACKET, "[", 0, 0),
+    JSN_T (xtree_json_token_SYMBOL,   "A", 0, 1),
+    JSN_T (xtree_json_token_COMMA,    ",", 0, 2),
+    JSN_T (xtree_json_token_SYMBOL,   "B", 0, 3),
+    JSN_T (xtree_json_token_RBRACKET, "]", 0, 4),
+  };
+  if (!jsn_run ("[A,B]", list, JSN_N (list)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp spaced[] = {
+    JSN_T (xtree_json_token_LBRACE,   "{",       0, 0),
+    JSN_T (xtree_json_token_SYMBOL,   "SomeVar", 0, 2),
+    JSN_T (xtree_json_token_COLON,    ":",       0, 10),
+    JSN_T (xtree_json_token_LBRACKET, "[",       0, 12),
+    JSN_T (xtree_json_token_SYMBOL,   "a",       0, 14),
+    JSN_T (xtree_json_token_COMMA,    ",",       0, 16),
+    JSN_T (xtree_json_token_SYMBOL,   "b",       0, 18),
+    JSN_T (xtree_json_token_RBRACKET, "]",       0, 20),
+    JSN_T (xtree_json_token_RBRACE,   "}",       0, 22),
+  };
+  if (!jsn_run ("{ SomeVar : [ a , b ] }", spaced, JSN_N (spaced)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp key_value[] = {
+    JSN_T (xtree_json_token_SYMBOL, "key",   0, 0),
+    JSN_T (xtree_json_token_COLON,  ":",     0, 3),
+    JSN_T (xtree_json_token_SYMBOL, "value", 0, 4),
+  };
+  if (!jsn_run ("key:value", key_value, JSN_N (key_value)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp comma[] = {
+    JSN_T (xtree_json_token_SYMBOL, "SomeVar", 0, 0),
+    JSN_T (xtree_json_token_COMMA,  ",",       0, 7),
+    JSN_T (xtree_json_token_SYMBOL, "Other",   0, 8),
+  };
+  if (!jsn_run ("SomeVar,Other", comma, JSN_N (comma)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp quote[] = {
+    JSN_T (xtree_json_token_SYMBOL, "a",     0, 0),
+    JSN_T (xtree_json_token_STRING, "\"b\"", 0, 1),
+  };
+  if (!jsn_run ("a\"b\"", quote, JSN_N (quote)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp comment[] = {
+    JSN_T (xtree_json_token_SYMBOL,  "a",   0, 0),
+    JSN_T (xtree_json_token_COMMENT, "//b", 0, 1),
+  };
+  if (!jsn_run ("a//b", comment, JSN_N (comment)))
+    rc = EXIT_FAILURE;
+
+  // A colon ends a word, so an unquoted URL is symbol, colon, comment.
+  static const struct jsn_exp url[] = {
+    JSN_T (xtree_json_token_SYMBOL,  "http",     0, 0),
+    JSN_T (xtree_json_token_COLON,   ":",        0, 4),
+    JSN_T (xtree_json_token_COMMENT, "//x.com",  0, 5),
+  };
+  if (!jsn_run ("http://x.com", url, JSN_N (url)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp lines[] = {
+    JSN_T (xtree_json_token_SYMBOL, "x", 0, 0),
+    JSN_T (xtree_json_token_SYMBOL, "y", 1, 0),
+  };
+  if (!jsn_run ("x\ny", lines, JSN_N (lines)))
+    rc = EXIT_FAILURE;
+
+  return rc;
+}
+
+// name: test_json_scan_special_values
+int test_json_scan_special_values (void)
+{
+  int rc = EXIT_SUCCESS;
+
+  static const char *const pos_inf[] = { "Infinity", "+Infinity" };
+  static const char *const neg_inf[] = { "-Infinity" };
+  static const char *const nan[]     = { "NaN" };
+  static const char *const undef[]   = { "undefined" };
+
+  if (jsn_run_single_cases (xtree_json_token_INFINITY, pos_inf,
+                            JSN_N (pos_inf)) != EXIT_SUCCESS)
+    rc = EXIT_FAILURE;
+  if (jsn_run_single_cases (xtree_json_token_NEG_INFINITY, neg_inf,
+                            JSN_N (neg_inf)) != EXIT_SUCCESS)
+    rc = EXIT_FAILURE;
+  if (jsn_run_single_cases (xtree_json_token_NAN, nan,
+                            JSN_N (nan)) != EXIT_SUCCESS)
+    rc = EXIT_FAILURE;
+  if (jsn_run_single_cases (xtree_json_token_UNDEFINED, undef,
+                            JSN_N (undef)) != EXIT_SUCCESS)
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp seq[] = {
+    JSN_T (xtree_json_token_INFINITY,     "Infinity",  0, 0),
+    JSN_T (xtree_json_token_NEG_INFINITY, "-Infinity", 0, 9),
+    JSN_T (xtree_json_token_INFINITY,     "+Infinity", 0, 19),
+    JSN_T (xtree_json_token_NAN,          "NaN",       0, 29),
+    JSN_T (xtree_json_token_UNDEFINED,    "undefined", 0, 33),
+  };
+  if (!jsn_run ("Infinity -Infinity +Infinity NaN undefined",
+                seq, JSN_N (seq)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp in_array[] = {
+    JSN_T (xtree_json_token_LBRACKET,     "[",         0, 0),
+    JSN_T (xtree_json_token_INFINITY,     "Infinity",  0, 1),
+    JSN_T (xtree_json_token_COMMA,        ",",         0, 9),
+    JSN_T (xtree_json_token_NEG_INFINITY, "-Infinity", 0, 10),
+    JSN_T (xtree_json_token_COMMA,        ",",         0, 19),
+    JSN_T (xtree_json_token_NAN,          "NaN",       0, 20),
+    JSN_T (xtree_json_token_RBRACKET,     "]",         0, 23),
+  };
+  if (!jsn_run ("[Infinity,-Infinity,NaN]", in_array, JSN_N (in_array)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp in_object[] = {
+    JSN_T (xtree_json_token_LBRACE,    "{",         0, 0),
+    JSN_T (xtree_json_token_STRING,    "\"a\"",     0, 1),
+    JSN_T (xtree_json_token_COLON,     ":",         0, 4),
+    JSN_T (xtree_json_token_UNDEFINED, "undefined", 0, 5),
+    JSN_T (xtree_json_token_RBRACE,    "}",         0, 14),
+  };
+  if (!jsn_run ("{\"a\":undefined}", in_object, JSN_N (in_object)))
+    rc = EXIT_FAILURE;
+
+  return rc;
+}
+
+// name: test_json_scan_comments_single
+int test_json_scan_comments_single (void)
+{
+  // Each input is one COMMENT whose text is the input itself: everything
+  // after "//" is comment, whatever it contains.
+  static const char *const cases[] = {
+    "//", "// hello", "//x", "///", "///x", "// // nested", "//a//b",
+    "// \"quoted\"", "// \"unterminated string",
+    "// {}[]:,", "// a/*b*/", "//\ttab", "// \xc3\xa9", "// 1 2 3 true",
+    "// http://x.com", "// 'x", "// \\", "// \\n",
+  };
+  return jsn_run_single_cases (xtree_json_token_COMMENT, cases,
+                               JSN_N (cases));
+}
+
+// name: test_json_scan_comments_in_context
+int test_json_scan_comments_in_context (void)
+{
+  int rc = EXIT_SUCCESS;
+
+  // A comment ends at LF; the LF is not part of it.
+  static const struct jsn_exp lf[] = {
+    JSN_T (xtree_json_token_COMMENT, "// hi", 0, 0),
+  };
+  if (!jsn_run ("// hi\n", lf, JSN_N (lf)))
+    rc = EXIT_FAILURE;
+
+  // CRLF: neither the CR nor the LF is part of the comment.
+  static const struct jsn_exp crlf[] = {
+    JSN_T (xtree_json_token_COMMENT, "// hi", 0, 0),
+    JSN_T (xtree_json_token_NUMBER,  "1",     1, 0),
+  };
+  if (!jsn_run ("// hi\r\n1", crlf, JSN_N (crlf)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp trailing[] = {
+    JSN_T (xtree_json_token_NUMBER,  "1",      0, 0),
+    JSN_T (xtree_json_token_COMMENT, "// one", 0, 2),
+    JSN_T (xtree_json_token_NUMBER,  "2",      1, 0),
+    JSN_T (xtree_json_token_COMMENT, "// two", 1, 2),
+  };
+  if (!jsn_run ("1 // one\n2 // two\n", trailing, JSN_N (trailing)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp in_array[] = {
+    JSN_T (xtree_json_token_LBRACKET, "[",          0, 0),
+    JSN_T (xtree_json_token_NUMBER,   "1",          0, 1),
+    JSN_T (xtree_json_token_COMMA,    ",",          0, 2),
+    JSN_T (xtree_json_token_COMMENT,  "// first",   0, 4),
+    JSN_T (xtree_json_token_NUMBER,   "2",          1, 1),
+    JSN_T (xtree_json_token_RBRACKET, "]",          1, 2),
+  };
+  if (!jsn_run ("[1, // first\n 2]", in_array, JSN_N (in_array)))
+    rc = EXIT_FAILURE;
+
+  // The comment starts right after the previous token, with no space.
+  static const struct jsn_exp after_number[] = {
+    JSN_T (xtree_json_token_NUMBER,  "1",   0, 0),
+    JSN_T (xtree_json_token_COMMENT, "//c", 0, 1),
+  };
+  if (!jsn_run ("1//c", after_number, JSN_N (after_number)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp after_literal[] = {
+    JSN_T (xtree_json_token_TRUE,    "true", 0, 0),
+    JSN_T (xtree_json_token_COMMENT, "//c",  0, 4),
+  };
+  if (!jsn_run ("true//c", after_literal, JSN_N (after_literal)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp after_special[] = {
+    JSN_T (xtree_json_token_INFINITY, "Infinity", 0, 0),
+    JSN_T (xtree_json_token_COMMENT,  "//c",      0, 8),
+  };
+  if (!jsn_run ("Infinity//c", after_special, JSN_N (after_special)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp after_string[] = {
+    JSN_T (xtree_json_token_STRING,  "\"s\"", 0, 0),
+    JSN_T (xtree_json_token_COMMENT, "//c",   0, 3),
+  };
+  if (!jsn_run ("\"s\"//c", after_string, JSN_N (after_string)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp after_brace[] = {
+    JSN_T (xtree_json_token_LBRACE,  "{",   0, 0),
+    JSN_T (xtree_json_token_COMMENT, "//c", 0, 1),
+    JSN_T (xtree_json_token_RBRACE,  "}",   1, 0),
+  };
+  if (!jsn_run ("{//c\n}", after_brace, JSN_N (after_brace)))
+    rc = EXIT_FAILURE;
+
+  // Consecutive comments are separate tokens, and blank lines are skipped.
+  static const struct jsn_exp consecutive[] = {
+    JSN_T (xtree_json_token_COMMENT, "//a", 0, 0),
+    JSN_T (xtree_json_token_COMMENT, "//b", 1, 0),
+  };
+  if (!jsn_run ("//a\n//b", consecutive, JSN_N (consecutive)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp blank_lines[] = {
+    JSN_T (xtree_json_token_COMMENT, "// a", 0, 0),
+    JSN_T (xtree_json_token_NUMBER,  "1",    3, 0),
+  };
+  if (!jsn_run ("// a\n\n\n1", blank_lines, JSN_N (blank_lines)))
+    rc = EXIT_FAILURE;
+
+  // Commented-out JSON is just comment text.
+  static const struct jsn_exp commented_out[] = {
+    JSN_T (xtree_json_token_LBRACE,  "{",                    0, 0),
+    JSN_T (xtree_json_token_COMMENT, "// \"a\": 1, \"b\": [", 1, 2),
+    JSN_T (xtree_json_token_RBRACE,  "}",                    2, 0),
+  };
+  if (!jsn_run ("{\n  // \"a\": 1, \"b\": [\n}", commented_out,
+                JSN_N (commented_out)))
+    rc = EXIT_FAILURE;
+
+  return rc;
+}
+
+// name: test_json_scan_error_unterminated_string
+int test_json_scan_error_unterminated_string (void)
+{
+  // The only way scanning fails. The ERROR token is positioned at the end
+  // of the input, where the closing quote was expected. Strings may span
+  // lines, so a newline does not end an unterminated string.
+  static const struct jsn_bad_case cases[] = {
+    { "\"", 0, 1 },
+    { "\"abc", 0, 4 },
+    { "\"abc\\", 0, 5 },             /* input ends after a backslash */
+    { "\"abc\\\"", 0, 6 },           /* the only closing quote is escaped */
+    { "\"\\u12", 0, 5 },
+    { "\"// comment", 0, 11 },       /* not a comment inside a string */
+    { "\"abc\n", 1, 0 },
+    { "\"a\nb", 1, 1 },
+    { "\"a\r\nb", 1, 1 },
+    { "\"\n\n", 2, 0 },
+    { "\"line one\nline two", 1, 8 },
+  };
+  return jsn_run_bad_cases (cases, JSN_N (cases));
+}
+
+// name: test_json_scan_error_after_tokens
+int test_json_scan_error_after_tokens (void)
+{
+  // Valid tokens are returned (with correct positions) up to the point
+  // of the error.
+  int rc = EXIT_SUCCESS;
+
+  static const struct jsn_exp in_object[] = {
+    JSN_T (xtree_json_token_LBRACE, "{",     0, 0),
+    JSN_T (xtree_json_token_STRING, "\"a\"", 0, 1),
+    JSN_T (xtree_json_token_COLON,  ":",     0, 4),
+    JSN_T (xtree_json_token_ERROR,  "",      0, 7),
+  };
+  if (!jsn_run ("{\"a\":\"b", in_object, JSN_N (in_object)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp multi_line[] = {
+    JSN_T (xtree_json_token_LBRACKET, "[", 0, 0),
+    JSN_T (xtree_json_token_NUMBER,   "1", 0, 1),
+    JSN_T (xtree_json_token_COMMA,    ",", 0, 2),
+    JSN_T (xtree_json_token_ERROR,    "",  2, 3),
+  };
+  if (!jsn_run ("[1,\n\"abc\ndef", multi_line, JSN_N (multi_line)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp after_symbol[] = {
+    JSN_T (xtree_json_token_SYMBOL, "x", 0, 0),
+    JSN_T (xtree_json_token_ERROR,  "",  0, 3),
+  };
+  if (!jsn_run ("x \"", after_symbol, JSN_N (after_symbol)))
+    rc = EXIT_FAILURE;
+
+  static const struct jsn_exp after_comment[] = {
+    JSN_T (xtree_json_token_COMMENT, "// c", 0, 0),
+    JSN_T (xtree_json_token_ERROR,   "",     1, 1),
+  };
+  if (!jsn_run ("// c\n\"", after_comment, JSN_N (after_comment)))
+    rc = EXIT_FAILURE;
+
+  return rc;
+}
+
+// name: test_json_scan_long_symbol_and_comment
+int test_json_scan_long_symbol_and_comment (void)
+{
+  int ret = EXIT_FAILURE;
+  const size_t len = 100000;
+  char *sym = malloc (len + 1);
+  char *com = malloc (len + 3);
+
+  if (!sym || !com) {
+    PERROR ("Failed to allocate test data\n");
+    goto cleanup;
+  }
+
+  for (size_t i=0; i<len; i++)
+    sym[i] = (char)('A' + (i % 26));
+  sym[len] = '\0';
+
+  com[0] = '/';
+  com[1] = '/';
+  for (size_t i=0; i<len; i++)
+    com[i + 2] = (char)('a' + (i % 26));
+  com[len + 2] = '\0';
+
+  struct jsn_exp e = JSN_T (xtree_json_token_SYMBOL, sym, 0, 0);
+  if (!jsn_run (sym, &e, 1))
+    goto cleanup;
+  e.id = xtree_json_token_COMMENT;
+  e.text = com;
+  if (!jsn_run (com, &e, 1))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  free (sym);
+  free (com);
+  return ret;
+}
+
+// name: test_json_scan_null_reader
+int test_json_scan_null_reader (void)
+{
+  // A NULL reader must be handled without crashing. What is returned is
+  // up to the library: either NULL or an ERROR token.
+  int ret = EXIT_FAILURE;
+  xtree_scan_token_t *tok = xtree_json_scan (NULL);
+
+  if (tok && xtree_scan_token_id (tok) != xtree_json_token_ERROR) {
+    PERROR ("Scanning a NULL reader returned a [%s] token\n",
+            jsn_idname (xtree_scan_token_id (tok)));
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_scan_token_free (&tok);
+  return ret;
+}
+
+// name: test_json_scan_tokens_independent
+int test_json_scan_tokens_independent (void)
+{
+  // Tokens own their data: freeing one must not disturb another, and
+  // both must survive the reader being freed.
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = xtree_reader_str (JSN_NAME, "\"a\",");
+  xtree_scan_token_t *t1 = NULL;
+  xtree_scan_token_t *t2 = NULL;
+
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  t1 = xtree_json_scan (reader);
+  t2 = xtree_json_scan (reader);
+  if (!t1 || !t2) {
+    PERROR ("Failed to scan two tokens\n");
+    goto cleanup;
+  }
+
+  xtree_reader_free (&reader);
+
+  const char *text = xtree_scan_token_text (t1);
+  if (xtree_scan_token_id (t1) != xtree_json_token_STRING ||
+      !text || strcmp (text, "\"a\"") != 0) {
+    PERROR ("First token is wrong after the reader was freed\n");
+    goto cleanup;
+  }
+
+  xtree_scan_token_free (&t1);
+  t1 = NULL;
+
+  text = xtree_scan_token_text (t2);
+  if (xtree_scan_token_id (t2) != xtree_json_token_COMMA ||
+      !text || strcmp (text, ",") != 0) {
+    PERROR ("Second token is wrong after the first was deleted\n");
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_scan_token_free (&t1);
+  xtree_scan_token_free (&t2);
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+// name: test_json_scan_long_string
+int test_json_scan_long_string (void)
+{
+  // Much longer than any plausible internal buffer.
+  int ret = EXIT_FAILURE;
+  const size_t len = 100000;
+  char *buf = malloc (len + 3);
+
+  if (!buf) {
+    PERROR ("Failed to allocate test data\n");
+    return EXIT_FAILURE;
+  }
+
+  buf[0] = '"';
+  for (size_t i=0; i<len; i++)
+    buf[i + 1] = (char)('a' + (i % 26));
+  buf[len + 1] = '"';
+  buf[len + 2] = '\0';
+
+  struct jsn_exp e = JSN_T (xtree_json_token_STRING, buf, 0, 0);
+  if (!jsn_run (buf, &e, 1))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  free (buf);
+  return ret;
+}
+
+// name: test_json_scan_long_number
+int test_json_scan_long_number (void)
+{
+  int ret = EXIT_FAILURE;
+  const size_t ndigits = 5000;
+  static const char tail[] = ".5e+10";
+  char *buf = malloc (1 + ndigits + sizeof tail);
+
+  if (!buf) {
+    PERROR ("Failed to allocate test data\n");
+    return EXIT_FAILURE;
+  }
+
+  buf[0] = '1';
+  for (size_t i=0; i<ndigits; i++)
+    buf[i + 1] = (char)('0' + (i % 10));
+  memcpy (buf + 1 + ndigits, tail, sizeof tail);   /* includes the NUL */
+
+  struct jsn_exp e = JSN_T (xtree_json_token_NUMBER, buf, 0, 0);
+  if (!jsn_run (buf, &e, 1))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  free (buf);
+  return ret;
+}
+
+// name: test_json_scan_many_tokens
+int test_json_scan_many_tokens (void)
+{
+  // "[0,0,0,...,0]": 2 + count numbers + (count - 1) commas tokens.
+  int ret = EXIT_FAILURE;
+  const size_t count = 5000;
+  xtree_reader_t *reader = NULL;
+  char *buf = malloc (2 * count + 2);
+  size_t n = 0;
+
+  if (!buf) {
+    PERROR ("Failed to allocate test data\n");
+    return EXIT_FAILURE;
+  }
+
+  buf[n++] = '[';
+  for (size_t i=0; i<count; i++) {
+    if (i)
+      buf[n++] = ',';
+    buf[n++] = '0';
+  }
+  buf[n++] = ']';
+  buf[n] = '\0';
+
+  reader = xtree_reader_str (JSN_NAME, buf);
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  size_t line0 = xtree_reader_line (reader);
+  size_t cpos0 = xtree_reader_cpos (reader);
+
+  if (!jsn_check_token (reader, xtree_json_token_LBRACKET, "[",
+                        line0, cpos0))
+    goto cleanup;
+  for (size_t i=0; i<count; i++) {
+    if (!jsn_check_token (reader, xtree_json_token_NUMBER, "0",
+                          line0, cpos0 + 1 + 2 * i)) {
+      PERROR ("Number %zu was wrong\n", i);
+      goto cleanup;
+    }
+    if (i + 1 < count &&
+        !jsn_check_token (reader, xtree_json_token_COMMA, ",",
+                          line0, cpos0 + 2 + 2 * i)) {
+      PERROR ("Comma %zu was wrong\n", i);
+      goto cleanup;
+    }
+  }
+  if (!jsn_check_token (reader, xtree_json_token_RBRACKET, "]",
+                        line0, cpos0 + 2 * count))
+    goto cleanup;
+  if (!jsn_check_eof (reader))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  free (buf);
+  return ret;
+}
+
+
 int main (void)
 {
   int errcount = 0;
@@ -3655,6 +5103,41 @@ int main (void)
     TEST (test_reader_file_basic),
     TEST (test_reader_file_large),
     TEST (test_reader_file_null_input),
+
+#if 0
+    /* Tests for xtree_json_scan() */
+    TEST (test_json_scan_eof_empty),
+    TEST (test_json_scan_eof_whitespace_only),
+    TEST (test_json_scan_punctuation_each),
+    TEST (test_json_scan_punctuation_sequence),
+    TEST (test_json_scan_punctuation_whitespace_separated),
+    TEST (test_json_scan_grammar_agnostic),
+    TEST (test_json_scan_literals_each),
+    TEST (test_json_scan_literals_sequence),
+    TEST (test_json_scan_literals_in_structure),
+    TEST (test_json_scan_strings_valid),
+    TEST (test_json_scan_strings_sequence),
+    TEST (test_json_scan_numbers_valid),
+    TEST (test_json_scan_numbers_delimited),
+    TEST (test_json_scan_whitespace_kinds),
+    TEST (test_json_scan_full_document),
+    TEST (test_json_scan_token_filename),
+    TEST (test_json_scan_string_escapes_not_decoded),
+    TEST (test_json_scan_strings_multiline),
+    TEST (test_json_scan_symbols_single),
+    TEST (test_json_scan_symbols_delimited),
+    TEST (test_json_scan_special_values),
+    TEST (test_json_scan_comments_single),
+    TEST (test_json_scan_comments_in_context),
+    TEST (test_json_scan_error_unterminated_string),
+    TEST (test_json_scan_error_after_tokens),
+    TEST (test_json_scan_null_reader),
+    TEST (test_json_scan_tokens_independent),
+    TEST (test_json_scan_long_string),
+    TEST (test_json_scan_long_number),
+    TEST (test_json_scan_many_tokens),
+    TEST (test_json_scan_long_symbol_and_comment),
+#endif
   };
 #undef TEST
 
