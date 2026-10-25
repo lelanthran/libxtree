@@ -11,7 +11,7 @@ extern "C" {
   // Construct a new reader object from a string or a file. In the case of the
   // string, the reader makes a copy of it so the caller can mutate the
   // parameter `input` after the `xtree_reader_str()` function returns.
-  xtree_reader_t *xtree_reader_str (const char *name, const char *input);
+  xtree_reader_t *xtree_reader_str (const char *name, const unsigned char *input);
   xtree_reader_t *xtree_reader_file (const char *name, FILE *input);
 
   // Delete a reader object, freeing all resources held by it.

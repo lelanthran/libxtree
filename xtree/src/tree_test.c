@@ -2265,7 +2265,7 @@ int test_reader_create_free (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", "abc");
+  reader = xtree_reader_str ("test", (const unsigned char *)"abc");
   if (!reader) {
     PERROR ("Failed to create reader from string\n");
     goto cleanup;
@@ -2291,7 +2291,7 @@ int test_reader_free_null_safety (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", "abc");
+  reader = xtree_reader_str ("test", (const unsigned char *)"abc");
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2340,7 +2340,7 @@ int test_reader_empty_input (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", "");
+  reader = xtree_reader_str ("test", (const unsigned char *)"");
   if (!reader) {
     PERROR ("Failed to create reader from the empty string\n");
     goto cleanup;
@@ -2374,7 +2374,7 @@ int test_reader_get_sequence (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", "abc");
+  reader = xtree_reader_str ("test", (const unsigned char *)"abc");
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2402,7 +2402,7 @@ int test_reader_eof_transitions (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", "x");
+  reader = xtree_reader_str ("test", (const unsigned char *)"x");
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2448,7 +2448,7 @@ int test_reader_peek_no_advance (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", "xy");
+  reader = xtree_reader_str ("test", (const unsigned char *)"xy");
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2503,7 +2503,7 @@ int test_reader_whitespace_returned (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", " \t\r\n x ");
+  reader = xtree_reader_str ("test", (const unsigned char *)" \t\r\n x ");
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2540,7 +2540,7 @@ int test_reader_whitespace_only_input (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", "  \n\t");
+  reader = xtree_reader_str ("test", (const unsigned char *)"  \n\t");
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2576,7 +2576,7 @@ int test_reader_peek_whitespace (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", " x");
+  reader = xtree_reader_str ("test", (const unsigned char *)" x");
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2615,7 +2615,7 @@ int test_reader_line_tracking (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", "a\nb\n\nc");
+  reader = xtree_reader_str ("test", (const unsigned char *)"a\nb\n\nc");
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2665,8 +2665,8 @@ int test_reader_cpos_tracking (void)
   xtree_reader_t *reader = NULL;
   xtree_reader_t *multi = NULL;
 
-  reader = xtree_reader_str ("test", "abc");
-  multi = xtree_reader_str ("test", "ab\ncd");
+  reader = xtree_reader_str ("test", (const unsigned char *)"abc");
+  multi = xtree_reader_str ("test", (const unsigned char *)"ab\ncd");
   if (!reader || !multi) {
     PERROR ("Failed to create readers\n");
     goto cleanup;
@@ -2731,7 +2731,7 @@ int test_reader_unget_basic (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", "ab");
+  reader = xtree_reader_str ("test", (const unsigned char *)"ab");
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2770,7 +2770,7 @@ int test_reader_unget_repeated_cycles (void)
   xtree_reader_t *reader = NULL;
   static const char *input = "abc";
 
-  reader = xtree_reader_str ("test", input);
+  reader = xtree_reader_str ("test", (const unsigned char *)input);
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2805,7 +2805,7 @@ int test_reader_unget_restores_position (void)
   size_t lines[3];
   size_t cposs[3];
 
-  reader = xtree_reader_str ("test", "a\nb");
+  reader = xtree_reader_str ("test", (const unsigned char *)"a\nb");
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2865,7 +2865,7 @@ int test_reader_unget_whitespace (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", "a b\nc");
+  reader = xtree_reader_str ("test", (const unsigned char *)"a b\nc");
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2935,7 +2935,7 @@ int test_reader_high_bytes (void)
   };
   static const int expected[] = { 0xff, 0xc3, 0xa9, 0x80, 'z' };
 
-  reader = xtree_reader_str ("test", input);
+  reader = xtree_reader_str ("test", (const unsigned char *)input);
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2971,8 +2971,8 @@ int test_reader_unget_after_eof (void)
   xtree_reader_t *reader = NULL;
   xtree_reader_t *empty = NULL;
 
-  reader = xtree_reader_str ("test", "ab");
-  empty = xtree_reader_str ("test", "");
+  reader = xtree_reader_str ("test", (const unsigned char *)"ab");
+  empty = xtree_reader_str ("test", (const unsigned char *)"");
   if (!reader || !empty) {
     PERROR ("Failed to create readers\n");
     goto cleanup;
@@ -3044,7 +3044,7 @@ int test_reader_input_copied (void)
   xtree_reader_t *reader = NULL;
   char buf[] = "abc";
 
-  reader = xtree_reader_str ("test", buf);
+  reader = xtree_reader_str ("test", (const unsigned char *)buf);
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -3077,8 +3077,8 @@ int test_reader_independent_readers (void)
   xtree_reader_t *r1 = NULL;
   xtree_reader_t *r2 = NULL;
 
-  r1 = xtree_reader_str ("one", "abc");
-  r2 = xtree_reader_str ("two", "abc");
+  r1 = xtree_reader_str ("one", (const unsigned char *)"abc");
+  r2 = xtree_reader_str ("two", (const unsigned char *)"abc");
   if (!r1 || !r2) {
     PERROR ("Failed to create readers\n");
     goto cleanup;
@@ -3123,7 +3123,7 @@ int test_reader_error_none_on_success (void)
   xtree_reader_t *reader = NULL;
   const struct xtree_errobj_t *err = NULL;
 
-  reader = xtree_reader_str ("test", "a b\nc");
+  reader = xtree_reader_str ("test", (const unsigned char *)"a b\nc");
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -3179,7 +3179,7 @@ int test_reader_error_query_idempotent (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", "ab");
+  reader = xtree_reader_str ("test", (const unsigned char *)"ab");
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -3236,7 +3236,7 @@ int test_reader_roundtrip (void)
   int c;
 
   // The reader reproduces its input exactly.
-  reader = xtree_reader_str ("test", input);
+  reader = xtree_reader_str ("test", (const unsigned char *)input);
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -3278,7 +3278,7 @@ cleanup:
  *   - Behaviour must be identical to xtree_reader_str() for the same data.
  *
  * Add to the includes:   (nothing new; fdump() already pulls in what we need)
- * Add to the TEST list:  test_reader_file_basic,
+ * Add to the TEST list:  test_reader_file_basic, (const unsigned char *)
  *                        test_reader_file_large,
  *                        test_reader_file_null_input
  * ------------------------------------------------------------------ */
@@ -3679,7 +3679,7 @@ static const char *jsn_idname (int id)
  * (JSN_AT_READER for both means "the reader's position after the call").
  * The token is freed. Returns true if everything matched. */
 static bool jsn_check_token (xtree_reader_t *reader, int id,
-                             const char *text, size_t line, size_t cpos)
+                             const unsigned char *text, size_t line, size_t cpos)
 {
   bool ok = false;
   xtree_scan_token_t *tok = xtree_json_scan (reader);
@@ -3696,19 +3696,19 @@ static bool jsn_check_token (xtree_reader_t *reader, int id,
   }
 
   int gid = xtree_scan_token_id (tok);
-  const char *gtext = xtree_scan_token_text (tok);
+  const unsigned char *gtext = xtree_scan_token_text (tok);
   const char *gname = xtree_scan_token_filename (tok);
   size_t gline = xtree_scan_token_line (tok);
   size_t gcpos = xtree_scan_token_cpos (tok);
 
   if (gid != id) {
     PERROR ("Expected token [%s], got [%s] with text [%.80s]\n",
-            jsn_idname (id), jsn_idname (gid), gtext ? gtext : "(null)");
+            jsn_idname (id), jsn_idname (gid), gtext ? (char *)gtext : "(null)");
     goto cleanup;
   }
-  if (!gtext || strcmp (gtext, text) != 0) {
+  if (!gtext || strcmp ((char *)gtext, (char *)text) != 0) {
     PERROR ("[%s]: expected text [%.80s], got [%.80s]\n", jsn_idname (id),
-            text, gtext ? gtext : "(null)");
+            text, gtext ? (char *)gtext : "(null)");
     goto cleanup;
   }
   if (!gname || strcmp (gname, JSN_NAME) != 0) {
@@ -3742,7 +3742,7 @@ cleanup:
 static bool jsn_check_eof (xtree_reader_t *reader)
 {
   for (size_t i=0; i<2; i++) {
-    if (!jsn_check_token (reader, xtree_json_token_EOF, "",
+    if (!jsn_check_token (reader, xtree_json_token_EOF, (const unsigned char *)"",
                           JSN_AT_READER, JSN_AT_READER))
       return false;
   }
@@ -3760,7 +3760,7 @@ static bool jsn_check_eof (xtree_reader_t *reader)
 static bool jsn_run (const char *input, const struct jsn_exp *want, size_t n)
 {
   bool ok = false;
-  xtree_reader_t *reader = xtree_reader_str (JSN_NAME, input);
+  xtree_reader_t *reader = xtree_reader_str (JSN_NAME, (const unsigned char *)input);
 
   if (!reader) {
     PERROR ("Failed to create reader\n");
@@ -3771,7 +3771,7 @@ static bool jsn_run (const char *input, const struct jsn_exp *want, size_t n)
   size_t cpos0 = xtree_reader_cpos (reader);
 
   for (size_t i=0; i<n; i++) {
-    if (!jsn_check_token (reader, want[i].id, want[i].text,
+    if (!jsn_check_token (reader, want[i].id, (const unsigned char *)want[i].text,
                           line0 + want[i].line, cpos0 + want[i].cpos)) {
       PERROR ("Token %zu of input [%.80s] was wrong\n", i, input);
       goto cleanup;
@@ -4276,7 +4276,7 @@ int test_json_scan_token_filename (void)
   // hard-coded filename in the scanner would be caught.)
   int ret = EXIT_FAILURE;
   static const char *const name = "dir/other-name.json";
-  xtree_reader_t *reader = xtree_reader_str (name, "[1]");
+  xtree_reader_t *reader = xtree_reader_str (name, (const unsigned char *)"[1]");
   xtree_scan_token_t *tok = NULL;
 
   if (!reader) {
@@ -4858,7 +4858,7 @@ int test_json_scan_tokens_independent (void)
   // Tokens own their data: freeing one must not disturb another, and
   // both must survive the reader being freed.
   int ret = EXIT_FAILURE;
-  xtree_reader_t *reader = xtree_reader_str (JSN_NAME, "\"a\",");
+  xtree_reader_t *reader = xtree_reader_str (JSN_NAME, (const unsigned char *)"\"a\",");
   xtree_scan_token_t *t1 = NULL;
   xtree_scan_token_t *t2 = NULL;
 
@@ -4876,9 +4876,9 @@ int test_json_scan_tokens_independent (void)
 
   xtree_reader_free (&reader);
 
-  const char *text = xtree_scan_token_text (t1);
+  const unsigned char *text = xtree_scan_token_text (t1);
   if (xtree_scan_token_id (t1) != xtree_json_token_STRING ||
-      !text || strcmp (text, "\"a\"") != 0) {
+      !text || strcmp ((char *)text, "\"a\"") != 0) {
     PERROR ("First token is wrong after the reader was freed\n");
     goto cleanup;
   }
@@ -4888,7 +4888,7 @@ int test_json_scan_tokens_independent (void)
 
   text = xtree_scan_token_text (t2);
   if (xtree_scan_token_id (t2) != xtree_json_token_COMMA ||
-      !text || strcmp (text, ",") != 0) {
+      !text || strcmp ((char *)text, ",") != 0) {
     PERROR ("Second token is wrong after the first was deleted\n");
     goto cleanup;
   }
@@ -4985,7 +4985,7 @@ int test_json_scan_many_tokens (void)
   buf[n++] = ']';
   buf[n] = '\0';
 
-  reader = xtree_reader_str (JSN_NAME, buf);
+  reader = xtree_reader_str (JSN_NAME, (const unsigned char *)buf);
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -4994,23 +4994,23 @@ int test_json_scan_many_tokens (void)
   size_t line0 = xtree_reader_line (reader);
   size_t cpos0 = xtree_reader_cpos (reader);
 
-  if (!jsn_check_token (reader, xtree_json_token_LBRACKET, "[",
+  if (!jsn_check_token (reader, xtree_json_token_LBRACKET, (const unsigned char *)"[",
                         line0, cpos0))
     goto cleanup;
   for (size_t i=0; i<count; i++) {
-    if (!jsn_check_token (reader, xtree_json_token_NUMBER, "0",
+    if (!jsn_check_token (reader, xtree_json_token_NUMBER, (const unsigned char *)"0",
                           line0, cpos0 + 1 + 2 * i)) {
       PERROR ("Number %zu was wrong\n", i);
       goto cleanup;
     }
     if (i + 1 < count &&
-        !jsn_check_token (reader, xtree_json_token_COMMA, ",",
+        !jsn_check_token (reader, xtree_json_token_COMMA, (const unsigned char *)",",
                           line0, cpos0 + 2 + 2 * i)) {
       PERROR ("Comma %zu was wrong\n", i);
       goto cleanup;
     }
   }
-  if (!jsn_check_token (reader, xtree_json_token_RBRACKET, "]",
+  if (!jsn_check_token (reader, xtree_json_token_RBRACKET, (const unsigned char *)"]",
                         line0, cpos0 + 2 * count))
     goto cleanup;
   if (!jsn_check_eof (reader))

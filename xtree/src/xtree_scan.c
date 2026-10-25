@@ -10,7 +10,7 @@
 
 struct xtree_scan_token_t {
   int id;
-  char *text;
+  unsigned char *text;
   char *filename;
   size_t line;
   size_t cpos;
@@ -20,7 +20,7 @@ struct xtree_scan_token_t {
 xtree_scan_token_t *xtree_scan_token_new (int id,
                                           const char *filename,
                                           size_t line, size_t cpos,
-                                          const char *text, size_t len)
+                                          const unsigned char *text, size_t len)
 {
   xtree_scan_token_t *ret = calloc (1, sizeof *ret);
   if (!ret ||
@@ -52,7 +52,7 @@ int xtree_scan_token_id (const xtree_scan_token_t *token)
   return token ? token->id : -1;
 }
 
-const char *xtree_scan_token_text (const xtree_scan_token_t *token)
+const unsigned char *xtree_scan_token_text (const xtree_scan_token_t *token)
 {
   return token ? token->text : NULL;
 }

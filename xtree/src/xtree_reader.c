@@ -77,9 +77,9 @@ static xtree_reader_t *xtree_reader_new (const char *name, unsigned char *input)
   return ret;
 }
 
-xtree_reader_t *xtree_reader_str (const char *name, const char *input)
+xtree_reader_t *xtree_reader_str (const char *name, const unsigned char *input)
 {
-  return xtree_reader_new (name, (unsigned char *)ds_str_dup (input));
+  return xtree_reader_new (name, (unsigned char *)ds_str_dup ((char *)input));
 }
 
 xtree_reader_t *xtree_reader_file (const char *name, FILE *input)

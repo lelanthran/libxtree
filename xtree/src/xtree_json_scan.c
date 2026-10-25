@@ -39,7 +39,7 @@ static xtree_scan_token_t *scan_string (xtree_reader_t *reader)
                                   xtree_reader_name (reader),
                                   xtree_reader_line (reader),
                                   xtree_reader_cpos (reader),
-                                  "", 0);
+                                  (const unsigned char *)"", 0);
       goto cleanup;
     }
 
@@ -65,7 +65,7 @@ static xtree_scan_token_t *scan_string (xtree_reader_t *reader)
                                     xtree_reader_name (reader),
                                     xtree_reader_line (reader),
                                     xtree_reader_cpos (reader),
-                                    "", 0);
+                                    (const unsigned char *)"", 0);
         goto cleanup;
       }
     }
@@ -82,7 +82,7 @@ static xtree_scan_token_t *scan_string (xtree_reader_t *reader)
 
   if (!(ret = xtree_scan_token_new (xtree_json_token_STRING,
                                     filename, line, cpos,
-                                    (char *)token,
+                                    token,
                                     strlen ((char *)token))))
     goto cleanup;
 
@@ -138,25 +138,25 @@ xtree_scan_token_t *xtree_json_scan (xtree_reader_t *reader)
 
     // First the easy ones - return single character strings.
     case EOF:
-      ret = TOKEN_SCHAR (xtree_json_token_EOF, "");
+      ret = TOKEN_SCHAR (xtree_json_token_EOF, (const unsigned char *)"");
       break;
     case '{':
-      ret = TOKEN_SCHAR (xtree_json_token_LBRACE, "{");
+      ret = TOKEN_SCHAR (xtree_json_token_LBRACE, (const unsigned char *)"{");
       break;
     case '}':
-      ret = TOKEN_SCHAR (xtree_json_token_RBRACE, "}");
+      ret = TOKEN_SCHAR (xtree_json_token_RBRACE, (const unsigned char *)"}");
       break;
     case '[':
-      ret = TOKEN_SCHAR (xtree_json_token_LBRACKET, "[");
+      ret = TOKEN_SCHAR (xtree_json_token_LBRACKET, (const unsigned char *)"[");
       break;
     case ']':
-      ret = TOKEN_SCHAR (xtree_json_token_RBRACKET, "]");
+      ret = TOKEN_SCHAR (xtree_json_token_RBRACKET, (const unsigned char *)"]");
       break;
     case ',':
-      ret = TOKEN_SCHAR (xtree_json_token_COMMA, ",");
+      ret = TOKEN_SCHAR (xtree_json_token_COMMA, (const unsigned char *)",");
       break;
     case ':':
-      ret = TOKEN_SCHAR (xtree_json_token_COLON, ":");
+      ret = TOKEN_SCHAR (xtree_json_token_COLON, (const unsigned char *)":");
       break;
 
     // Next easy ones: tokens that are a single function call away
