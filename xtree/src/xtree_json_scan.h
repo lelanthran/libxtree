@@ -39,7 +39,7 @@
     xtree_json_token_RBRACKET,        // ]
     xtree_json_token_COLON,           // :
     xtree_json_token_COMMA,           // ,
-    xtree_json_token_STRING,          // "..." (quotes retained, escapes as-is)
+    xtree_json_token_STRING,          // "..." (quotes removed, escapes as-is)
     xtree_json_token_NUMBER,          // -12.5e+3, .5, +1, 0x1F, 017, 0b101
     xtree_json_token_TRUE,            // true
     xtree_json_token_FALSE,           // false
@@ -48,8 +48,10 @@
     xtree_json_token_SYMBOL,          // any other unquoted word
     xtree_json_token_INFINITY,        // Infinity, +Infinity
     xtree_json_token_NEG_INFINITY,    // -Infinity
-    xtree_json_token_NAN,             // NaN
-    xtree_json_token_UNDEFINED        // undefined
+    xtree_json_token_NAN,             // NaN, +NaN
+    xtree_json_token_NEG_NAN,         // -NaN
+    xtree_json_token_UNDEFINED,       // undefined
+    xtree_json_token_UNRECOGNISED     // Unknown tokens
   };
 
 

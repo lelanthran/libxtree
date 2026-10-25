@@ -17,6 +17,7 @@ extern "C" {
   void xtree_scan_token_free (xtree_scan_token_t **token);
 
   int xtree_scan_token_id (const xtree_scan_token_t *token);
+  void xtree_scan_token_id_set (xtree_scan_token_t *token, int id);
   const unsigned char *xtree_scan_token_text (const xtree_scan_token_t *token);
   const char *xtree_scan_token_filename (const xtree_scan_token_t *token);
   size_t xtree_scan_token_line (const xtree_scan_token_t *token);

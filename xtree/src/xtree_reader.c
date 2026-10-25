@@ -61,6 +61,7 @@ struct xtree_reader_t {
   size_t input_idx;
 
   // Track state of reader
+  bool can_unget;
   struct xtree_errobj_t err;
 
 };
@@ -74,6 +75,7 @@ static xtree_reader_t *xtree_reader_new (const char *name, unsigned char *input)
   }
   ret->input = input;
   ret->input_len = strlen ((char *)input);
+  ret->can_unget = true;
   return ret;
 }
 
@@ -156,6 +158,8 @@ int xtree_reader_get (xtree_reader_t *reader)
 {
   if (!reader || reader->input_idx >= reader->input_len ||
       reader->input[reader->input_idx] == 0) {
+    if (reader)
+      reader->can_unget = false;
     return EOF;
   }
   return reader->input[reader->input_idx++];
@@ -163,7 +167,7 @@ int xtree_reader_get (xtree_reader_t *reader)
 
 void xtree_reader_unget (xtree_reader_t *reader)
 {
-  if (reader && reader->input_idx > 0) {
+  if (reader && reader->input_idx > 0 && reader->can_unget) {
     reader->input_idx--;
   }
 }

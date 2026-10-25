@@ -52,6 +52,13 @@ int xtree_scan_token_id (const xtree_scan_token_t *token)
   return token ? token->id : -1;
 }
 
+void xtree_scan_token_id_set (xtree_scan_token_t *token, int id)
+{
+  if (token) {
+    token->id = id;
+  }
+}
+
 const unsigned char *xtree_scan_token_text (const xtree_scan_token_t *token)
 {
   return token ? token->text : NULL;
