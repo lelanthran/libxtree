@@ -14,6 +14,8 @@ const char *xtree_errcode_str (enum xtree_errcode_t code)
     const char *s;
   } errcodes[] = {
     ERRCODE (xtree_errcode_NONE),
+    ERRCODE (xtree_errcode_UNKNOWN),
+    ERRCODE (xtree_errcode_EOF),
     ERRCODE (xtree_errcode_OOM),
     ERRCODE (xtree_errcode_PARAMETER_TYPE),
     ERRCODE (xtree_errcode_ATTRIBUTE_NOT_FOUND),
@@ -21,6 +23,8 @@ const char *xtree_errcode_str (enum xtree_errcode_t code)
     ERRCODE (xtree_errcode_INTERNAL_STATE),
     ERRCODE (xtree_errcode_CHILD_NOT_FOUND),
     ERRCODE (xtree_errcode_NULL_PARAMETER),
+    ERRCODE (xtree_errcode_UNEXPECTED_TOKEN),
+    ERRCODE (xtree_errcode_DEPTH_EXCEEDED),
   };
   static const size_t nerrcodes = sizeof errcodes / sizeof errcodes[0];
 #undef ERRCODE
@@ -48,18 +52,6 @@ bool xtree_errobj_reset (struct xtree_errobj_t *err, size_t msglen)
     return false;
   }
   return true;
-}
-
-void xtree_errobj_clrerr (struct xtree_errobj_t *err)
-{
-  if (!err)
-    return;
-
-  size_t len = err->message_len;
-  char *tmp = err->message;
-  memset (err, 0, sizeof *err);
-  err->message_len = len;
-  err->message = tmp;
 }
 
 void xtree_errobj_dump (const struct xtree_errobj_t *err, FILE *outf)

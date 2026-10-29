@@ -59,8 +59,16 @@ const char *xtree_node_type_string (enum xtree_node_type_t type);
 // error. The parent must be of type _LIST.
 xtree_node_t *xtree_node_new (struct xtree_errobj_t *err,
                               xtree_node_t *parent,
-                              const char *optional_name,
+                              const unsigned char *optional_name,
                               enum xtree_node_type_t type);
+xtree_node_t *xtree_node_new_atom (struct xtree_errobj_t *err,
+                                   xtree_node_t *parent,
+                                   const unsigned char *optional_name,
+                                   const unsigned char *value, ...);
+xtree_node_t *xtree_node_new_atomv (struct xtree_errobj_t *err,
+                                    xtree_node_t *parent,
+                                    const unsigned char *optional_name,
+                                    const unsigned char *value, va_list ap);
 
 // Free the specified node, removing it from any parent if necessary. Also
 // sets the pointer to NULL so callers can call this multiple times with the
@@ -68,17 +76,24 @@ xtree_node_t *xtree_node_new (struct xtree_errobj_t *err,
 // recursively freed as well.
 void xtree_node_free (xtree_node_t **node);
 
+
 // Dump the node recursively. Used only during testing. If `outf` is NULL,
 // stdout is used.
-void xtree_node_dump (const xtree_node_t *node, FILE *outf, size_t depth);
+void xtree_node_dump_file (const xtree_node_t *node, FILE *outf, size_t depth);
+
+// Dump the node recursively. Used only during testing. Caller must free the
+// returned value.
+char *xtree_node_dump_str (const xtree_node_t *node, size_t depth);
+
 
 // Set/get the name of the node. Note that the node name is optional, and if not
 // set, or set to NULL, will default to `""`. The caller must not free or mutate
 // the returned value. NULL is returned on error and extended error information
 // is available in parameter `err` for `_name_set`.
-const char *xtree_node_name_get (const xtree_node_t *node);
-const char *xtree_node_name_set (struct xtree_errobj_t *err,
-                                 xtree_node_t *node, const char *name);
+const unsigned char *xtree_node_name_get (const xtree_node_t *node);
+const unsigned char *xtree_node_name_set (struct xtree_errobj_t *err,
+                                          xtree_node_t *node,
+                                          const unsigned char *name);
 
 // Return the type of the node. This can only be set during node creation. On
 // success the node type is returned, on error _UNKNOWN is returned.
@@ -93,19 +108,19 @@ xtree_node_t *xtree_node_parent (struct xtree_errobj_t *err,
 // Set/get the value of a node. Only applies to nodes of type _ATOM, returns
 // error for all other nodes with extended error information in the mandatory
 // `err` parameter. The caller must not free or mutate the returned value.
-const char *xtree_node_value_get (struct xtree_errobj_t *err,
-                                  const xtree_node_t *node);
+const unsigned char *xtree_node_value_get (struct xtree_errobj_t *err,
+                                           const xtree_node_t *node);
 // Returns the node's new value on success. Only applies to nodes of type
 // _ATOM.
-const char *xtree_node_value_set (struct xtree_errobj_t *err,
-                                  xtree_node_t *node,
-                                  const char *value);
+const unsigned char *xtree_node_value_set (struct xtree_errobj_t *err,
+                                           xtree_node_t *node,
+                                           const unsigned char *value);
 // Appends the specified string to the value stored in the node. Only applies
 // to nodes of type _ATOM. If no existing value is stored, then the `extra`
 // parameter is stored. Returns the node's new value on success.
-const char *xtree_node_value_append (struct xtree_errobj_t *err,
-                                     xtree_node_t *node,
-                                     const char *extra);
+const unsigned char *xtree_node_value_append (struct xtree_errobj_t *err,
+                                              xtree_node_t *node,
+                                              const unsigned char *extra);
 
 
 
@@ -180,9 +195,10 @@ xtree_node_t *xtree_node_child_attach (struct xtree_errobj_t *err,
 // information is stored in the mandatory `err` parameter. If node, name or
 // value is NULL, then NULL is returned and extended error information is set in
 // the `err` parameter.
-const char *xtree_node_attr_new (struct xtree_errobj_t *err,
-                                 xtree_node_t *node,
-                                 const char *name, const char *value);
+const unsigned char *xtree_node_attr_new (struct xtree_errobj_t *err,
+                                          xtree_node_t *node,
+                                          const unsigned char *name,
+                                          const unsigned char *value);
 
 // Returns the number of attributes in the node on success. If the node is
 // NULL, `0` is returned.
@@ -191,26 +207,27 @@ size_t xtree_node_attr_count (const xtree_node_t *node);
 // Set the first attribute with the specified name to the specified value, or
 // return NULL if the attribute does not exist with extended error information
 // stored in the mandatory `err` parameter. All parameters must be non-NULL.
-const char *xtree_node_attr_value_set (struct xtree_errobj_t *err,
-                                       xtree_node_t *node,
-                                       const char *name, const char *value);
+const unsigned char *xtree_node_attr_value_set (struct xtree_errobj_t *err,
+                                                xtree_node_t *node,
+                                                const unsigned char *name,
+                                                const unsigned char *value);
 
 // Return the n'th attribute of the specified name, or NULL if the attribute
 // does not exist or if an error occurred. Error information is stored in the
 // mandatory `err` parameter.Neither node nor name can be NULL, and will
 // result in an error. If `n` is out of bounds (i.e. there are two attributes
 // with `name` but the third one is requested) then an error is returned.
-const char *xtree_node_attr_value_get (struct xtree_errobj_t *err,
-                                       const xtree_node_t *node,
-                                       const char *name, size_t n);
+const unsigned char *xtree_node_attr_value_get (struct xtree_errobj_t *err,
+                                                const xtree_node_t *node,
+                                                const unsigned char *name, size_t n);
 
 // Return the first attribute of the specified name, or NULL if the attribute
 // does not exist or if an error occurred. Error information is stored in the
 // mandatory `err` parameter. Neither node nor name can be NULL, and will
 // result in an error.
-const char *xtree_node_attr_value_get1 (struct xtree_errobj_t *err,
-                                        const xtree_node_t *node,
-                                        const char *name);
+const unsigned char *xtree_node_attr_value_get1 (struct xtree_errobj_t *err,
+                                                 const xtree_node_t *node,
+                                                 const unsigned char *name);
 
 
 

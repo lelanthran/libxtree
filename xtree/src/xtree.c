@@ -11,15 +11,16 @@
 #include "xtree.h"
 
 
-static char *str_replace (struct xtree_errobj_t *err, char **dst, const char *src)
+static unsigned char *str_replace (struct xtree_errobj_t *err,
+                                   unsigned char **dst, const unsigned char *src)
 {
   if (!dst)
       return NULL;
 
   if (!src)
-    src = "";
+    src = (unsigned char *)"";
 
-  char *tmp = ds_str_dup (src);
+  unsigned char *tmp = (unsigned char *)ds_str_dup ((char *)src);
   if (!tmp) {
     ERROR (err, xtree_errcode_OOM, "OOM allocating new string [%s]\n", src);
     return NULL;
@@ -35,8 +36,8 @@ static char *str_replace (struct xtree_errobj_t *err, char **dst, const char *sr
  * Opaque type for key/value pairs.
  */
 struct xtree_kv_t {
-  char *name;
-  char *value;
+  unsigned char *name;
+  unsigned char *value;
 };
 
 static void xtree_kv_free (xtree_kv_t **kv)
@@ -55,20 +56,20 @@ static void xtree_kv_free_wrap (void *kv, void *ignore)
   xtree_kv_free ((xtree_kv_t **)&kv);
 }
 
-static xtree_kv_t *xtree_kv_new (const char *name, const char *value)
+static xtree_kv_t *xtree_kv_new (const unsigned char *name, const unsigned char *value)
 {
   xtree_kv_t *ret = calloc (1, sizeof *ret);
 
   if (!ret ||
-      !(ret->name = ds_str_dup (name)) ||
-      !(ret->value = ds_str_dup (value))) {
+      !(ret->name = (unsigned char *)ds_str_dup ((char *)name)) ||
+      !(ret->value = (unsigned char *)ds_str_dup ((char *)value))) {
     xtree_kv_free (&ret);
   }
   return ret;
 }
 
-static char *xtree_kv_value_set (struct xtree_errobj_t *err,
-                                 xtree_kv_t *kv, const char *value)
+static unsigned char *xtree_kv_value_set (struct xtree_errobj_t *err,
+                                          xtree_kv_t *kv, const unsigned char *value)
 {
   if (!kv) {
     ERROR (err, xtree_errcode_PARAMETER_TYPE, "KV object cannot be NULL.");
@@ -78,8 +79,8 @@ static char *xtree_kv_value_set (struct xtree_errobj_t *err,
   return str_replace (err, &(kv->value), value);
 }
 
-static const char *xtree_kv_value_get (struct xtree_errobj_t *err,
-                                       const xtree_kv_t *kv)
+static const unsigned char *xtree_kv_value_get (struct xtree_errobj_t *err,
+                                                const xtree_kv_t *kv)
 {
   if (!kv) {
     ERROR (err, xtree_errcode_PARAMETER_TYPE, "KV object is NULL");
@@ -104,13 +105,13 @@ static const char *xtree_kv_name_get (const xtree_kv_t *kv)
 #endif
 
 
-static xtree_kv_t *xtree_kvlist_find (ds_array_t *kvlist, const char *name)
+static xtree_kv_t *xtree_kvlist_find (ds_array_t *kvlist, const unsigned char *name)
 {
   size_t nitems = ds_array_length (kvlist);
 
   for (size_t i=0; i<nitems; i++) {
     xtree_kv_t *kv = ds_array_get (kvlist, i);
-    if ((strcmp (kv->name, name)) == 0) {
+    if ((strcmp ((char *)kv->name, (char *)name)) == 0) {
        return kv;
     }
   }
@@ -118,13 +119,13 @@ static xtree_kv_t *xtree_kvlist_find (ds_array_t *kvlist, const char *name)
 }
 
 static xtree_kv_t *xtree_kvlist_get (ds_array_t *kvlist,
-                                     const char *name, size_t n)
+                                     const unsigned char *name, size_t n)
 {
   size_t nitems = ds_array_length (kvlist);
   size_t count = 0;
   for (size_t i=0; i < nitems; i++) {
     xtree_kv_t *kv = ds_array_get (kvlist, i);
-    if (((strcmp (kv->name, name)) == 0)) {
+    if (((strcmp ((char *)kv->name, (char *)name)) == 0)) {
       if (count == n)
         return kv;
       count++;
@@ -189,14 +190,14 @@ const char *xtree_node_type_string (enum xtree_node_type_t type)
 
 
 union atom_t {
-  char *_value;           // Name of this node
+  unsigned char *_value;           // value of this node
   ds_array_t *_children;  // xtree_node_t pointers
 };
 
 struct xtree_node_t {
   enum xtree_node_type_t type;  // Type of this node
 
-  char *name;                   // Optional name for this node
+  unsigned char *name;          // Optional name for this node
   xtree_node_t *parent;         // Parent node, or NULL if no parent
   ds_array_t *attrs;            // xtree_kv_t pointers
   union atom_t atom;            // Node data or an array of children
@@ -220,7 +221,7 @@ static bool check_type (struct xtree_errobj_t *err,
                         const xtree_node_t *node,
                         enum xtree_node_type_t type)
 {
-  xtree_errobj_clrerr (err);
+  xtree_errobj_reset (err, 1024);
   if (!node || node->type != type) {
     ERROR (err, xtree_errcode_PARAMETER_TYPE,
            "Expected note type [%s], got [%s]",
@@ -246,7 +247,7 @@ static bool check_atom (struct xtree_errobj_t *err,
 static bool check_bounds (struct xtree_errobj_t *err,
                           const xtree_node_t *node, size_t position)
 {
-  xtree_errobj_clrerr (err);
+  xtree_errobj_reset (err, 1024);
   if (position >= ds_array_length (node->atom._children)) {
     ERROR (err, xtree_errcode_OUT_OF_BOUNDS,
               "Requested [%zu] child of [%zu] children",
@@ -264,19 +265,19 @@ static bool check_bounds (struct xtree_errobj_t *err,
 
 xtree_node_t *xtree_node_new (struct xtree_errobj_t *err,
                               xtree_node_t *parent,
-                              const char *optional_name,
+                              const unsigned char *optional_name,
                               enum xtree_node_type_t type)
 {
   bool error = true;
   xtree_node_t *ret = calloc (1, sizeof *ret);
 
-  xtree_errobj_clrerr (err);
+  xtree_errobj_reset (err, 1024);
 
   if (!optional_name)
-    optional_name = "";
+    optional_name = (const unsigned char *)"";
 
   if (!ret ||
-      !(ret->name = ds_str_dup (optional_name)) ||
+      !(ret->name = (unsigned char *)ds_str_dup ((char *)optional_name)) ||
       !(ret->attrs = ds_array_new ())) {
     ERROR (err, xtree_errcode_OOM, "Failed to create node object.");
     goto cleanup;
@@ -286,7 +287,7 @@ xtree_node_t *xtree_node_new (struct xtree_errobj_t *err,
 
   switch (type) {
     case xtree_node_type_ATOM:
-      if (!(ret->atom._value = ds_str_dup (""))) {
+      if (!(ret->atom._value = (unsigned char *)ds_str_dup (""))) {
         ERROR (err, xtree_errcode_OOM, "Failed to create atom.");
         goto cleanup;
       }
@@ -323,6 +324,50 @@ cleanup:
 
   return ret;
 }
+
+xtree_node_t *xtree_node_new_atom (struct xtree_errobj_t *err,
+                                   xtree_node_t *parent,
+                                   const unsigned char *optional_name,
+                                   const unsigned char *value, ...)
+{
+  va_list ap;
+  va_start (ap, value);
+  xtree_node_t *ret = xtree_node_new_atomv (err, parent, optional_name, value, ap);
+  va_end (ap);
+  return ret;
+}
+
+xtree_node_t *xtree_node_new_atomv (struct xtree_errobj_t *err,
+                                    xtree_node_t *parent,
+                                    const unsigned char *optional_name,
+                                    const unsigned char *value, va_list ap)
+{
+  bool error = true;
+
+  xtree_node_t *ret = NULL;
+  unsigned char *tmp = NULL;
+
+  if (!(tmp = (unsigned char *)ds_str_vcat ((char *)value, ap))) {
+    ERROR (err, xtree_errcode_OOM, "OOM");
+    goto cleanup;
+  }
+  if (!(ret = xtree_node_new (err, parent, optional_name, xtree_node_type_ATOM))) {
+    goto cleanup;
+  }
+  free (ret->atom._value);
+  ret->atom._value = tmp;
+  tmp = NULL;
+
+  error = false;
+
+cleanup:
+  free (tmp);
+  if (error) {
+    xtree_node_free (&ret);
+  }
+  return ret;
+}
+
 
 
 void xtree_node_free (xtree_node_t **node)
@@ -366,7 +411,7 @@ void xtree_node_free (xtree_node_t **node)
   *node = NULL;
 }
 
-void xtree_node_dump (const xtree_node_t *node, FILE *outf, size_t depth)
+void xtree_node_dump_file (const xtree_node_t *node, FILE *outf, size_t depth)
 {
   if (!outf)
     outf = stdout;
@@ -382,7 +427,8 @@ void xtree_node_dump (const xtree_node_t *node, FILE *outf, size_t depth)
   INDENT;
   fprintf (outf, "node:type     [%i]\n", node->type);
   INDENT;
-  fprintf (outf, "node:parent   [%s]\n", node->parent ? node->parent->name : "No parent");
+  fprintf (outf, "node:parent   [%s]\n",
+           node->parent ? (char *)node->parent->name : "No parent");
   INDENT;
   fprintf (outf, "node:nattrs     %zu\n", ds_array_length (node->attrs));
   size_t nitems = ds_array_length (node->attrs);
@@ -406,7 +452,7 @@ void xtree_node_dump (const xtree_node_t *node, FILE *outf, size_t depth)
 
       for (size_t i=0; i<nitems; i++) {
         xtree_node_t *child = ds_array_get (node->atom._children, i);
-        xtree_node_dump (child, outf, (depth + 1));
+        xtree_node_dump_file (child, outf, (depth + 1));
       }
       break;
 
@@ -419,15 +465,106 @@ void xtree_node_dump (const xtree_node_t *node, FILE *outf, size_t depth)
 #undef INDENT
 }
 
-const char *xtree_node_name_get (const xtree_node_t *node)
+
+static char *sprintv (char **dst, const char *fmt, va_list ap)
 {
-  return (node && node->name) ? node->name : "";
+  va_list copy;
+  va_copy (copy, ap);
+  int add_len = vsnprintf (NULL, 0, fmt, copy);
+  va_end (copy);
+  char *tmp = malloc ((size_t)add_len + 1);
+  if (!tmp) {
+    return NULL;
+  }
+
+  vsnprintf (tmp, (size_t)add_len + 1, fmt, ap);
+
+  if (!(ds_str_append (dst, tmp, NULL))) {
+    free (tmp);
+    return NULL;
+  }
+
+  free (tmp);
+  return *dst;
 }
 
-const char *xtree_node_name_set (struct xtree_errobj_t *err,
-                                 xtree_node_t *node, const char *name)
+static char *sprint (char **dst, const char *fmt, ...)
 {
-  xtree_errobj_clrerr (err);
+  va_list ap;
+  va_start (ap, fmt);
+  char *ret = sprintv (dst, fmt, ap);
+  va_end (ap);
+  return ret;
+}
+
+static char *dump_str (const xtree_node_t *node, char **dst, size_t depth)
+{
+  if (!node) {
+    sprint (dst, "NULL node_t object\n");
+    return *dst;
+  }
+
+#define INDENT    for (size_t i=0; i<depth; i++) sprint (dst, " ")
+
+  INDENT;
+  sprint (dst, "node:         (%s)\n", node->name);
+  INDENT;
+  sprint (dst, "node:type     [%i]\n", node->type);
+  INDENT;
+  sprint (dst, "node:parent   [%s]\n",
+          node->parent ? (char *)node->parent->name : "No parent");
+  INDENT;
+  sprint (dst, "node:nattrs     %zu\n", ds_array_length (node->attrs));
+  size_t nitems = ds_array_length (node->attrs);
+  for (size_t i=0; i<nitems; i++) {
+    xtree_kv_t *kv = ds_array_get (node->attrs, i);
+    INDENT;
+    sprint (dst, "node:%s:attr[%s:%s]\n",
+             node->name, kv->name, kv->value);
+  }
+
+  INDENT;
+
+  switch (node->type) {
+    case xtree_node_type_ATOM:
+      sprint (dst, "node:value  [%s]\n", node->atom._value);
+      break;
+
+    case xtree_node_type_LIST:
+      sprint (dst, "node:nchildren  %zu\n", ds_array_length (node->atom._children));
+      nitems = ds_array_length (node->atom._children);
+
+      for (size_t i=0; i<nitems; i++) {
+        xtree_node_t *child = ds_array_get (node->atom._children, i);
+        dump_str (child, dst, (depth + 1));
+      }
+      break;
+
+    case xtree_node_type_UNKNOWN:
+    default:
+      // Do nothing
+      break;
+  }
+
+#undef INDENT
+  return *dst;
+}
+
+char *xtree_node_dump_str (const xtree_node_t *node, size_t depth)
+{
+  char *dst = NULL;
+  return dump_str (node, &dst, depth);
+}
+
+const unsigned char *xtree_node_name_get (const xtree_node_t *node)
+{
+  return (node && node->name) ? node->name : (unsigned char *)"";
+}
+
+const unsigned char *xtree_node_name_set (struct xtree_errobj_t *err,
+                                 xtree_node_t *node, const unsigned char *name)
+{
+  xtree_errobj_reset (err, 1024);
   if (!(check_nullparam (err, node, "node")))
     return NULL;
   return str_replace (err, &node->name, name);
@@ -441,14 +578,14 @@ enum xtree_node_type_t xtree_node_type_get (const xtree_node_t *node)
 xtree_node_t *xtree_node_parent (struct xtree_errobj_t *err,
                                  const xtree_node_t *node)
 {
-  xtree_errobj_clrerr (err);
+  xtree_errobj_reset (err, 1024);
   if (!(check_nullparam (err, node, "node")))
     return NULL;
   return node->parent;
 }
 
-const char *xtree_node_value_get (struct xtree_errobj_t *err,
-                                  const xtree_node_t *node)
+const unsigned char *xtree_node_value_get (struct xtree_errobj_t *err,
+                                           const xtree_node_t *node)
 {
   if (!(check_atom (err, node)))
     return NULL;
@@ -456,8 +593,9 @@ const char *xtree_node_value_get (struct xtree_errobj_t *err,
   return node->atom._value;
 }
 
-const char *xtree_node_value_set (struct xtree_errobj_t *err,
-                                  xtree_node_t *node, const char *value)
+const unsigned char *xtree_node_value_set (struct xtree_errobj_t *err,
+                                           xtree_node_t *node,
+                                           const unsigned char *value)
 {
   if (!(check_atom (err, node)))
     return NULL;
@@ -465,15 +603,17 @@ const char *xtree_node_value_set (struct xtree_errobj_t *err,
   return str_replace (err, &node->atom._value, value);
 }
 
-const char *xtree_node_value_append (struct xtree_errobj_t *err,
-                                     xtree_node_t *node,
-                                     const char *extra)
+const unsigned char *xtree_node_value_append (struct xtree_errobj_t *err,
+                                              xtree_node_t *node,
+                                              const unsigned char *extra)
 {
   if (!(check_atom (err, node)))
     return NULL;
 
-  char *tmp = ds_str_cat (node->atom._value ? node->atom._value : "",
-                          extra, NULL);
+  unsigned char *tmp = (unsigned char *)ds_str_cat (node->atom._value ?
+                                                      (char *)node->atom._value :
+                                                      "",
+                                                    extra, NULL);
   if (!tmp) {
     ERROR (err, xtree_errcode_OOM,
            "OOM appending value [%s] + [%s]",
@@ -632,9 +772,10 @@ xtree_node_t *xtree_node_child_attach (struct xtree_errobj_t *err,
 
 
 
-const char *xtree_node_attr_new (struct xtree_errobj_t *err,
-                                 xtree_node_t *node,
-                                 const char *name, const char *value)
+const unsigned char *xtree_node_attr_new (struct xtree_errobj_t *err,
+                                          xtree_node_t *node,
+                                          const unsigned char *name,
+                                          const unsigned char *value)
 {
   bool error = true;
   xtree_kv_t *tmp = NULL;
@@ -667,9 +808,10 @@ size_t xtree_node_attr_count (const xtree_node_t *node)
   return node ? ds_array_length (node->attrs) : 0;
 }
 
-const char *xtree_node_attr_value_set (struct xtree_errobj_t *err,
-                                       xtree_node_t *node,
-                                       const char *name, const char *value)
+const unsigned char *xtree_node_attr_value_set (struct xtree_errobj_t *err,
+                                                xtree_node_t *node,
+                                                const unsigned char *name,
+                                                const unsigned char *value)
 {
   if (!(check_nullparam (err, node, "node")) ||
       !(check_nullparam (err, name, "name")) ||
@@ -685,9 +827,9 @@ const char *xtree_node_attr_value_set (struct xtree_errobj_t *err,
   return xtree_kv_value_set (err, found, value);
 }
 
-const char *xtree_node_attr_value_get (struct xtree_errobj_t *err,
-                                       const xtree_node_t *node,
-                                       const char *name, size_t n)
+const unsigned char *xtree_node_attr_value_get (struct xtree_errobj_t *err,
+                                                const xtree_node_t *node,
+                                                const unsigned char *name, size_t n)
 {
   if (!(check_nullparam (err, node, "node")) ||
       !(check_nullparam (err, name, "name")))
@@ -701,11 +843,11 @@ const char *xtree_node_attr_value_get (struct xtree_errobj_t *err,
   return kv->value;
 }
 
-const char *xtree_node_attr_value_get1 (struct xtree_errobj_t *err,
-                                        const xtree_node_t *node,
-                                        const char *name)
+const unsigned char *xtree_node_attr_value_get1 (struct xtree_errobj_t *err,
+                                                 const xtree_node_t *node,
+                                                 const unsigned char *name)
 {
-  xtree_errobj_clrerr (err);
+  xtree_errobj_reset (err, 1024);
 
   if (!node || !name) {
     ERROR (err, xtree_errcode_PARAMETER_TYPE,

@@ -459,5 +459,44 @@ xtree_scan_token_t *xtree_json_scan (xtree_reader_t *reader)
   return ret;
 }
 
+const char *xtree_json_token_id_str (enum xtree_json_token_id_t id)
+{
+  static const struct {
+    enum xtree_json_token_id_t id;
+    const char *str;
+  } ids[] = {
+#define X(id) { id, #id }
+    X (xtree_json_token_RESERVED),
+    X (xtree_json_token_ERROR),
+    X (xtree_json_token_EOF),
+    X (xtree_json_token_LBRACE),
+    X (xtree_json_token_RBRACE),
+    X (xtree_json_token_LBRACKET),
+    X (xtree_json_token_RBRACKET),
+    X (xtree_json_token_COLON),
+    X (xtree_json_token_COMMA),
+    X (xtree_json_token_STRING),
+    X (xtree_json_token_NUMBER),
+    X (xtree_json_token_TRUE),
+    X (xtree_json_token_FALSE),
+    X (xtree_json_token_NULL),
+    X (xtree_json_token_COMMENT),
+    X (xtree_json_token_SYMBOL),
+    X (xtree_json_token_INFINITY),
+    X (xtree_json_token_NEG_INFINITY),
+    X (xtree_json_token_NAN),
+    X (xtree_json_token_NEG_NAN),
+    X (xtree_json_token_UNDEFINED),
+    X (xtree_json_token_UNRECOGNISED),
+  };
+#undef X
+  static char unknown[] = "XXXXXXXXXXXXXXX - Unknown JSON token id";
 
-
+  for (size_t i=0; i<sizeof ids / sizeof ids[0]; i++) {
+    if (ids[i].id == id) {
+      return ids[i].str;
+    }
+  }
+  snprintf (unknown, sizeof unknown, "%i - Unknown JSON token id", id);
+  return unknown;
+}

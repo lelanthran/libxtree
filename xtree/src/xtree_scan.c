@@ -22,11 +22,12 @@ xtree_scan_token_t *xtree_scan_token_new (int id,
                                           size_t line, size_t cpos,
                                           const unsigned char *text, size_t len)
 {
+  bool error = true;
   xtree_scan_token_t *ret = calloc (1, sizeof *ret);
   if (!ret ||
       !(ret->text = malloc (len + 1)) ||
       !(ret->filename = ds_str_dup (filename)))
-    return NULL;
+    goto cleanup;
 
   ret->id = id;
   ret->line = line;
@@ -34,6 +35,11 @@ xtree_scan_token_t *xtree_scan_token_new (int id,
   memcpy (ret->text, text, len);
   ret->text[len] = 0;
 
+  error = false;
+cleanup:
+  if (error) {
+    xtree_scan_token_free (&ret);
+  }
   return ret;
 }
 
@@ -43,6 +49,7 @@ void xtree_scan_token_free (xtree_scan_token_t **token)
     return;
 
   free ((*token)->text);
+  free ((*token)->filename);
   free (*token);
   *token = NULL;
 }
@@ -77,5 +84,25 @@ size_t xtree_scan_token_line (const xtree_scan_token_t *token)
 size_t xtree_scan_token_cpos (const xtree_scan_token_t *token)
 {
   return token ? token->cpos : 0;
+}
+
+unsigned char *xtree_scan_token_dump (const xtree_scan_token_t *token,
+                                      unsigned char **dst)
+{
+  if (!dst || !token)
+    return NULL;
+  free (*dst); *dst = NULL;
+  ds_str_printf ((char **)dst,
+                 "token-id:        %i\n"
+                 "token-text:      [%s]\n"
+                 "token-filename:  [%s]\n"
+                 "token-line:      [%zu]\n"
+                 "token-cpos:      [%zu]",
+                 token->id,
+                 token->text,
+                 token->filename,
+                 token->line,
+                 token->cpos);
+  return *dst;
 }
 

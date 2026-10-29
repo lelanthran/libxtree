@@ -23,6 +23,10 @@ extern "C" {
   size_t xtree_scan_token_line (const xtree_scan_token_t *token);
   size_t xtree_scan_token_cpos (const xtree_scan_token_t *token);
 
+  // Frees and reallocates `dst` to hold the printed representation of the
+  // token in `field: value` format.
+  unsigned char *xtree_scan_token_dump (const xtree_scan_token_t *token,
+                                        unsigned char **dst);
 
 #ifdef __cplusplus
 };

@@ -31,6 +31,7 @@
   // EOF and ERROR tokens have an empty string as their text.
 
   enum xtree_json_token_id_t {
+    xtree_json_token_RESERVED   = -2, // Reserved for internal use
     xtree_json_token_ERROR      = -1, // Error in scanner
     xtree_json_token_EOF        = 0,  // End of input
     xtree_json_token_LBRACE,          // {
@@ -51,7 +52,7 @@
     xtree_json_token_NAN,             // NaN, +NaN
     xtree_json_token_NEG_NAN,         // -NaN
     xtree_json_token_UNDEFINED,       // undefined
-    xtree_json_token_UNRECOGNISED     // Unknown tokens
+    xtree_json_token_UNRECOGNISED,    // Unknown tokens
   };
 
 
@@ -65,6 +66,8 @@ extern "C" {
   // On an unterminated string an xtree_json_token_ERROR token is returned.
   xtree_scan_token_t *xtree_json_scan (xtree_reader_t *reader);
 
+  // Get a string representation of the token id.
+  const char *xtree_json_token_id_str (enum xtree_json_token_id_t id);
 
 #ifdef __cplusplus
 };

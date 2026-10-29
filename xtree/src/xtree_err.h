@@ -4,6 +4,8 @@
 
 enum xtree_errcode_t {
   xtree_errcode_NONE = 0,
+  xtree_errcode_UNKNOWN,
+  xtree_errcode_EOF,
   xtree_errcode_OOM,
   xtree_errcode_PARAMETER_TYPE,
   xtree_errcode_ATTRIBUTE_NOT_FOUND,
@@ -11,6 +13,8 @@ enum xtree_errcode_t {
   xtree_errcode_INTERNAL_STATE,
   xtree_errcode_CHILD_NOT_FOUND,
   xtree_errcode_NULL_PARAMETER,
+  xtree_errcode_UNEXPECTED_TOKEN,
+  xtree_errcode_DEPTH_EXCEEDED,
 };
 
 struct xtree_errobj_t {
@@ -51,13 +55,6 @@ extern "C" {
   // completely. NOTE: This just resizes (or frees) the message buffer. Use
   // xtree_errobj_clrerr() to clear the errors stored.
   bool xtree_errobj_reset (struct xtree_errobj_t *err, size_t msglen);
-
-  // Clear the error object. Does not free the message, only clears it. Use
-  // `reset` with a message-length of `0` to free it (or do it manually, as
-  // the fields are exposed to the caller). NOTE: This only clears the error
-  // stored, it does not free any buffers. To free the message buffer, use
-  // xtree_errobj_reset with a parameter of `0` for the msglen.
-  void xtree_errobj_clrerr (struct xtree_errobj_t *err);
 
   // Print the error object. If `outf` is NULL, `stdout` is used.
   void xtree_errobj_dump (const struct xtree_errobj_t *err, FILE *outf);

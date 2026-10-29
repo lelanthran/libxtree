@@ -16,7 +16,20 @@
 #include "xtree_reader.h"
 #include "xtree_scan.h"
 #include "xtree_json_scan.h"
+#include "xtree_json_parse.h"
 
+
+/* All xtree text (names, values, attribute keys, input) is unsigned char *
+ * so that UTF-8 survives. U() gives a string literal (or char buffer) that
+ * type; the u* helpers are the unsigned char * equivalents of the string.h
+ * functions the tests need. */
+#define U(s)    ((const unsigned char *)(s))
+#define CS(s)   ((const char *)(s))   /* for printf-style %s only */
+
+static int ustrcmp (const unsigned char *a, const unsigned char *b)
+{
+  return strcmp ((const char *)a, (const char *)b);
+}
 
 #define PERROR(...)   do { \
   fprintf (stderr, "%s:%i ", __FILE__, __LINE__); \
@@ -118,7 +131,7 @@ static int basic_test (void)
     goto cleanup;
   }
 
-  xtree_node_t *rootnode = xtree_node_new (&err, NULL, "rootnode", xtree_node_type_LIST);
+  xtree_node_t *rootnode = xtree_node_new (&err, NULL, U ("rootnode"), xtree_node_type_LIST);
   xtree_node_t *tmpnode = NULL;
 
   if (!rootnode) {
@@ -126,22 +139,22 @@ static int basic_test (void)
     goto cleanup;
   }
 
-  if (!(xtree_node_attr_new (&err, rootnode, "n1", "v1"))) {
+  if (!(xtree_node_attr_new (&err, rootnode, U ("n1"), U ("v1")))) {
     PERROR ("Failed to add first attrs to rootnode\n");
     goto cleanup;
   }
 
-  if (!(xtree_node_attr_value_set (&err, rootnode, "n1", "v-two"))) {
+  if (!(xtree_node_attr_value_set (&err, rootnode, U ("n1"), U ("v-two")))) {
     PERROR ("Failed to reset the name of the attribute\n");
     goto cleanup;
   }
 
-  const char *tmp = NULL;
-  if (!(tmp = xtree_node_attr_value_get1 (&err, rootnode, "n1"))) {
+  const unsigned char *tmp = NULL;
+  if (!(tmp = xtree_node_attr_value_get1 (&err, rootnode, U ("n1")))) {
     PERROR ("Failed to retrieve the node attribute value\n");
     goto cleanup;
   }
-  if ((strcmp (tmp, "v-two")) != 0) {
+  if ((ustrcmp (tmp, U ("v-two"))) != 0) {
     PERROR ("[%s]: Expected attribute to be [%s]\n", tmp, "v-two");
     goto cleanup;
   }
@@ -156,17 +169,17 @@ static int basic_test (void)
         ? xtree_node_type_ATOM
         : xtree_node_type_LIST;
 
-    if (!(tmpnode = xtree_node_new (&err, rootnode, nname, type))) {
+    if (!(tmpnode = xtree_node_new (&err, rootnode, U (nname), type))) {
       PERROR ("Failed to create childnode %zu\n", i);
       goto cleanup;
     }
-    const char *set = NULL;
+    const unsigned char *set = NULL;
     switch (type) {
       case xtree_node_type_ATOM:
-        set = xtree_node_value_set (&err, tmpnode, nvalue);
+        set = xtree_node_value_set (&err, tmpnode, U (nvalue));
         break;
       case xtree_node_type_LIST:
-        set = xtree_node_attr_new (&err, tmpnode, "_tag",  nname);
+        set = xtree_node_attr_new (&err, tmpnode, U ("_tag"),  U (nname));
         break;
       case xtree_node_type_UNKNOWN:
       default:
@@ -200,7 +213,7 @@ int test_create_root_list_node (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("root"), xtree_node_type_LIST);
   if (!node) {
     PERROR("Failed to create root LIST node\n");
     goto cleanup;
@@ -226,7 +239,7 @@ int test_create_root_atom_node (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "atom_root", xtree_node_type_ATOM);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("atom_root"), xtree_node_type_ATOM);
   if (!node) {
     PERROR("Failed to create root ATOM node\n");
     goto cleanup;
@@ -252,7 +265,7 @@ int test_node_free_null_safety (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "test", xtree_node_type_LIST);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("test"), xtree_node_type_LIST);
   if (!node) {
     PERROR("Failed to create node\n");
     goto cleanup;
@@ -284,26 +297,26 @@ int test_atom_value_set_get (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "atom", xtree_node_type_ATOM);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("atom"), xtree_node_type_ATOM);
   if (!node) {
     PERROR("Failed to create node\n");
     goto cleanup;
   }
 
-  const char *val_in = "Hello World";
-  const char *set_res = xtree_node_value_set (&err, node, val_in);
+  const unsigned char *val_in = U ("Hello World");
+  const unsigned char *set_res = xtree_node_value_set (&err, node, val_in);
   if (!set_res) {
     PERROR("Failed to set value\n");
     goto cleanup;
   }
 
-  if (strcmp (set_res, val_in) != 0) {
+  if (ustrcmp (set_res, val_in) != 0) {
     PERROR("Set return value mismatch\n");
     goto cleanup;
   }
 
-  const char *val_out = xtree_node_value_get (&err, node);
-  if (!val_out || strcmp (val_out, val_in) != 0) {
+  const unsigned char *val_out = xtree_node_value_get (&err, node);
+  if (!val_out || ustrcmp (val_out, val_in) != 0) {
     PERROR("Get value mismatch or NULL\n");
     goto cleanup;
   }
@@ -328,13 +341,13 @@ int test_atom_value_on_list (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "list", xtree_node_type_LIST);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("list"), xtree_node_type_LIST);
   if (!node) {
     PERROR("Failed to create node\n");
     goto cleanup;
   }
 
-  const char *res = xtree_node_value_set (&err, node, "Should not work?");
+  const unsigned char *res = xtree_node_value_set (&err, node, U ("Should not work?"));
   if (res != NULL) {
     PERROR("Warning: Value set on LIST node returned success.\n");
     goto cleanup;
@@ -361,22 +374,22 @@ int test_attribute_add_get (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "node", xtree_node_type_LIST);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("node"), xtree_node_type_LIST);
   if (!node) {
     PERROR("Failed to create node\n");
     goto cleanup;
   }
 
-  const char *key = "lang";
-  const char *val = "C";
+  const unsigned char *key = U ("lang");
+  const unsigned char *val = U ("C");
 
   if (!xtree_node_attr_new (&err, node, key, val)) {
     PERROR("Failed to add attribute\n");
     goto cleanup;
   }
 
-  const char *retrieved = xtree_node_attr_value_get1 (&err, node, key);
-  if (!retrieved || strcmp (retrieved, val) != 0) {
+  const unsigned char *retrieved = xtree_node_attr_value_get1 (&err, node, key);
+  if (!retrieved || ustrcmp (retrieved, val) != 0) {
     PERROR("Failed to retrieve attribute or mismatch\n");
     goto cleanup;
   }
@@ -401,29 +414,29 @@ int test_attribute_update (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "node", xtree_node_type_LIST);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("node"), xtree_node_type_LIST);
   if (!node) {
     PERROR("Failed to create node\n");
     goto cleanup;
   }
 
-  const char *key = "id";
-  xtree_node_attr_new (&err, node, key, "100");
+  const unsigned char *key = U ("id");
+  xtree_node_attr_new (&err, node, key, U ("100"));
 
-  const char *new_val = "200";
-  const char *res = xtree_node_attr_value_set (&err, node, key, new_val);
+  const unsigned char *new_val = U ("200");
+  const unsigned char *res = xtree_node_attr_value_set (&err, node, key, new_val);
 
-  if (!res || strcmp (res, new_val) != 0) {
+  if (!res || ustrcmp (res, new_val) != 0) {
     PERROR("Failed to update attribute\n");
     goto cleanup;
   }
 
-  const char *check = xtree_node_attr_value_get1 (&err, node, key);
+  const unsigned char *check = xtree_node_attr_value_get1 (&err, node, key);
   if (!check) {
     PERROR ("Attribute retrieval returned NULL\n");
     goto cleanup;
   }
-  if (strcmp (check, new_val) != 0) {
+  if (ustrcmp (check, new_val) != 0) {
     PERROR("Attribute value not actually updated\n");
     goto cleanup;
   }
@@ -448,13 +461,13 @@ int test_attribute_update_nonexistent (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "node", xtree_node_type_LIST);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("node"), xtree_node_type_LIST);
   if (!node) {
     PERROR("Failed to create node\n");
     goto cleanup;
   }
 
-  const char *res = xtree_node_attr_value_set (&err, node, "nonexistent", "val");
+  const unsigned char *res = xtree_node_attr_value_set (&err, node, U ("nonexistent"), U ("val"));
   if (res != NULL) {
     PERROR("Setting nonexistent attribute should return NULL per spec\n");
     goto cleanup;
@@ -481,25 +494,25 @@ int test_attribute_duplicate_names (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "node", xtree_node_type_LIST);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("node"), xtree_node_type_LIST);
   if (!node) {
     PERROR("Failed to create node\n");
     goto cleanup;
   }
 
-  const char *key = "color";
-  xtree_node_attr_new (&err, node, key, "red");
-  xtree_node_attr_new (&err, node, key, "blue");
+  const unsigned char *key = U ("color");
+  xtree_node_attr_new (&err, node, key, U ("red"));
+  xtree_node_attr_new (&err, node, key, U ("blue"));
 
-  const char *res = xtree_node_attr_value_get1 (&err, node, key);
-  if (!res || strcmp (res, "red") != 0) {
+  const unsigned char *res = xtree_node_attr_value_get1 (&err, node, key);
+  if (!res || ustrcmp (res, U ("red")) != 0) {
     PERROR("get1 did not return the first attribute\n");
     goto cleanup;
   }
 
-  xtree_node_attr_value_set (&err, node, key, "green");
+  xtree_node_attr_value_set (&err, node, key, U ("green"));
   res = xtree_node_attr_value_get1 (&err, node, key);
-  if (!res || strcmp (res, "green") != 0) {
+  if (!res || ustrcmp (res, U ("green")) != 0) {
     PERROR("Updating did not update the first attribute\n");
     goto cleanup;
   }
@@ -524,12 +537,12 @@ int test_child_append (void)
     goto cleanup;
   }
 
-  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  xtree_node_t *root = xtree_node_new (&err, NULL, U ("root"), xtree_node_type_LIST);
   if (!root) goto cleanup;
 
   xtree_node_t *children[5];
   for (int i = 0; i < 5; i++) {
-    children[i] = xtree_node_new (&err, root, "child", xtree_node_type_ATOM);
+    children[i] = xtree_node_new (&err, root, U ("child"), xtree_node_type_ATOM);
     if (!children[i]) {
       PERROR("Failed to create child %d\n", i);
       goto cleanup;
@@ -569,12 +582,12 @@ int test_child_detach_middle (void)
     goto cleanup;
   }
 
-  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  xtree_node_t *root = xtree_node_new (&err, NULL, U ("root"), xtree_node_type_LIST);
   if (!root) goto cleanup;
 
-  xtree_node_t *c1 = xtree_node_new (&err, root, "c1", xtree_node_type_ATOM);
-  xtree_node_t *c2 = xtree_node_new (&err, root, "c2", xtree_node_type_ATOM);
-  xtree_node_t *c3 = xtree_node_new (&err, root, "c3", xtree_node_type_ATOM);
+  xtree_node_t *c1 = xtree_node_new (&err, root, U ("c1"), xtree_node_type_ATOM);
+  xtree_node_t *c2 = xtree_node_new (&err, root, U ("c2"), xtree_node_type_ATOM);
+  xtree_node_t *c3 = xtree_node_new (&err, root, U ("c3"), xtree_node_type_ATOM);
 
   if (!c1 || !c2 || !c3) {
     PERROR("Failed to create children\n");
@@ -618,10 +631,10 @@ int test_child_detach_bounds (void)
     goto cleanup;
   }
 
-  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  xtree_node_t *root = xtree_node_new (&err, NULL, U ("root"), xtree_node_type_LIST);
   if (!root) goto cleanup;
 
-  if (!xtree_node_new (&err, root, "c1", xtree_node_type_ATOM)) {
+  if (!xtree_node_new (&err, root, U ("c1"), xtree_node_type_ATOM)) {
       PERROR("Failed to create child\n");
       goto cleanup;
   }
@@ -653,15 +666,15 @@ int test_child_insert_at_position (void)
     goto cleanup;
   }
 
-  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  xtree_node_t *root = xtree_node_new (&err, NULL, U ("root"), xtree_node_type_LIST);
   if (!root) goto cleanup;
 
-  xtree_node_t *c1 = xtree_node_new (&err, root, "c1", xtree_node_type_ATOM);
-  xtree_node_t *c3 = xtree_node_new (&err, root, "c3", xtree_node_type_ATOM);
+  xtree_node_t *c1 = xtree_node_new (&err, root, U ("c1"), xtree_node_type_ATOM);
+  xtree_node_t *c3 = xtree_node_new (&err, root, U ("c3"), xtree_node_type_ATOM);
 
   if (!c1 || !c3) goto cleanup;
 
-  xtree_node_t *c2 = xtree_node_new (&err, NULL, "c2", xtree_node_type_ATOM);
+  xtree_node_t *c2 = xtree_node_new (&err, NULL, U ("c2"), xtree_node_type_ATOM);
   if (!c2) goto cleanup;
 
   xtree_node_t *res = xtree_node_child_attach (&err, root, c2, 1);
@@ -709,16 +722,16 @@ int test_child_attach_bounds_append (void)
     goto cleanup;
   }
 
-  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  xtree_node_t *root = xtree_node_new (&err, NULL, U ("root"), xtree_node_type_LIST);
   if (!root) goto cleanup;
 
-  xtree_node_t *c1 = xtree_node_new (&err, root, "c1", xtree_node_type_ATOM);
+  xtree_node_t *c1 = xtree_node_new (&err, root, U ("c1"), xtree_node_type_ATOM);
   if (!c1) {
     PERROR("Failed to create c1\n");
     goto cleanup;
   }
 
-  xtree_node_t *c_new = xtree_node_new (&err, NULL, "c_new", xtree_node_type_ATOM);
+  xtree_node_t *c_new = xtree_node_new (&err, NULL, U ("c_new"), xtree_node_type_ATOM);
   if (!c_new) goto cleanup;
 
   xtree_node_t *res = xtree_node_child_attach (&err, root, c_new, 100);
@@ -762,12 +775,12 @@ int test_node_reparenting (void)
     goto cleanup;
   }
 
-  xtree_node_t *parent_a = xtree_node_new (&err, NULL, "parent_a", xtree_node_type_LIST);
-  xtree_node_t *parent_b = xtree_node_new (&err, NULL, "parent_b", xtree_node_type_LIST);
+  xtree_node_t *parent_a = xtree_node_new (&err, NULL, U ("parent_a"), xtree_node_type_LIST);
+  xtree_node_t *parent_b = xtree_node_new (&err, NULL, U ("parent_b"), xtree_node_type_LIST);
 
   if (!parent_a || !parent_b) goto cleanup;
 
-  xtree_node_t *child = xtree_node_new (&err, parent_a, "child", xtree_node_type_ATOM);
+  xtree_node_t *child = xtree_node_new (&err, parent_a, U ("child"), xtree_node_type_ATOM);
   if (!child) goto cleanup;
 
   if (xtree_node_child_count (parent_a) != 1) {
@@ -868,27 +881,27 @@ int test_node_name_get_set (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "initial", xtree_node_type_LIST);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("initial"), xtree_node_type_LIST);
   if (!node) {
     PERROR("Failed to create node\n");
     goto cleanup;
   }
 
-  const char *name = xtree_node_name_get (node);
-  if (!name || strcmp (name, "initial") != 0) {
-    PERROR("Expected initial name, got [%s]\n", name ? name : "(null)");
+  const unsigned char *name = xtree_node_name_get (node);
+  if (!name || ustrcmp (name, U ("initial")) != 0) {
+    PERROR("Expected initial name, got [%s]\n", name ? CS (name) : "(null)");
     goto cleanup;
   }
 
-  const char *set_res = xtree_node_name_set (&err, node, "changed");
-  if (!set_res || strcmp (set_res, "changed") != 0) {
+  const unsigned char *set_res = xtree_node_name_set (&err, node, U ("changed"));
+  if (!set_res || ustrcmp (set_res, U ("changed")) != 0) {
     PERROR("Failed to set node name\n");
     goto cleanup;
   }
 
   name = xtree_node_name_get (node);
-  if (!name || strcmp (name, "changed") != 0) {
-    PERROR("Name was not actually updated, got [%s]\n", name ? name : "(null)");
+  if (!name || ustrcmp (name, U ("changed")) != 0) {
+    PERROR("Name was not actually updated, got [%s]\n", name ? CS (name) : "(null)");
     goto cleanup;
   }
 
@@ -899,9 +912,9 @@ int test_node_name_get_set (void)
     goto cleanup;
   }
   name = xtree_node_name_get (node);
-  if (!name || strcmp (name, "") != 0) {
+  if (!name || ustrcmp (name, U ("")) != 0) {
     PERROR("Expected empty string after NULL name set, got [%s]\n",
-           name ? name : "(null)");
+           name ? CS (name) : "(null)");
     goto cleanup;
   }
 
@@ -931,12 +944,12 @@ int test_node_name_optional (void)
     goto cleanup;
   }
 
-  const char *name = xtree_node_name_get (node);
+  const unsigned char *name = xtree_node_name_get (node);
   if (!name) {
     PERROR("Name should default to non-NULL (\"\")\n");
     goto cleanup;
   }
-  if (strcmp (name, "") != 0) {
+  if (ustrcmp (name, U ("")) != 0) {
     PERROR("Expected default name to be \"\", got [%s]\n", name);
     goto cleanup;
   }
@@ -961,8 +974,8 @@ int test_node_type_get (void)
     goto cleanup;
   }
 
-  xtree_node_t *atom = xtree_node_new (&err, NULL, "a", xtree_node_type_ATOM);
-  xtree_node_t *list = xtree_node_new (&err, NULL, "l", xtree_node_type_LIST);
+  xtree_node_t *atom = xtree_node_new (&err, NULL, U ("a"), xtree_node_type_ATOM);
+  xtree_node_t *list = xtree_node_new (&err, NULL, U ("l"), xtree_node_type_LIST);
 
   if (!atom || !list) {
     PERROR("Failed to create nodes\n");
@@ -1006,7 +1019,7 @@ int test_node_type_get_invalid_create (void)
   }
 
   // Only ATOM and LIST are allowable per the header docs
-  xtree_node_t *bad = xtree_node_new (&err, NULL, "bad", xtree_node_type_UNKNOWN);
+  xtree_node_t *bad = xtree_node_new (&err, NULL, U ("bad"), xtree_node_type_UNKNOWN);
   if (bad != NULL) {
     PERROR("Creating node with UNKNOWN type should return NULL\n");
     xtree_node_free (&bad);
@@ -1033,7 +1046,7 @@ int test_node_parent (void)
     goto cleanup;
   }
 
-  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  xtree_node_t *root = xtree_node_new (&err, NULL, U ("root"), xtree_node_type_LIST);
   if (!root) goto cleanup;
 
   // A root node should have no parent
@@ -1042,7 +1055,7 @@ int test_node_parent (void)
     goto cleanup;
   }
 
-  xtree_node_t *child = xtree_node_new (&err, root, "child", xtree_node_type_ATOM);
+  xtree_node_t *child = xtree_node_new (&err, root, U ("child"), xtree_node_type_ATOM);
   if (!child) {
     PERROR("Failed to create child\n");
     goto cleanup;
@@ -1087,42 +1100,42 @@ int test_value_append (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "atom", xtree_node_type_ATOM);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("atom"), xtree_node_type_ATOM);
   if (!node) {
     PERROR("Failed to create node\n");
     goto cleanup;
   }
 
-  if (!xtree_node_value_set (&err, node, "Hello")) {
+  if (!xtree_node_value_set (&err, node, U ("Hello"))) {
     PERROR("Failed to set initial value\n");
     goto cleanup;
   }
 
-  const char *appended = xtree_node_value_append (&err, node, " World");
+  const unsigned char *appended = xtree_node_value_append (&err, node, U (" World"));
   if (!appended) {
     PERROR("Failed to append to value\n");
     goto cleanup;
   }
-  if (strcmp (appended, "Hello World") != 0) {
+  if (ustrcmp (appended, U ("Hello World")) != 0) {
     PERROR("Expected [Hello World], got [%s]\n", appended);
     goto cleanup;
   }
 
-  const char *check = xtree_node_value_get (&err, node);
-  if (!check || strcmp (check, "Hello World") != 0) {
+  const unsigned char *check = xtree_node_value_get (&err, node);
+  if (!check || ustrcmp (check, U ("Hello World")) != 0) {
     PERROR("Value get after append mismatch, got [%s]\n",
-           check ? check : "(null)");
+           check ? CS (check) : "(null)");
     goto cleanup;
   }
 
   // Append to a LIST node must fail
-  xtree_node_t *list = xtree_node_new (&err, NULL, "list", xtree_node_type_LIST);
+  xtree_node_t *list = xtree_node_new (&err, NULL, U ("list"), xtree_node_type_LIST);
   if (!list) {
     PERROR("Failed to create list node\n");
     goto cleanup;
   }
-  xtree_errobj_clrerr (&err);
-  const char *bad = xtree_node_value_append (&err, list, "nope");
+  xtree_errobj_reset (&err, 1024);
+  const unsigned char *bad = xtree_node_value_append (&err, list, U ("nope"));
   if (bad != NULL) {
     PERROR("Append on LIST node should return NULL\n");
     xtree_node_free (&list);
@@ -1151,12 +1164,12 @@ int test_child_find (void)
     goto cleanup;
   }
 
-  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  xtree_node_t *root = xtree_node_new (&err, NULL, U ("root"), xtree_node_type_LIST);
   if (!root) goto cleanup;
 
-  xtree_node_t *c0 = xtree_node_new (&err, root, "c0", xtree_node_type_ATOM);
-  xtree_node_t *c1 = xtree_node_new (&err, root, "c1", xtree_node_type_ATOM);
-  xtree_node_t *c2 = xtree_node_new (&err, root, "c2", xtree_node_type_ATOM);
+  xtree_node_t *c0 = xtree_node_new (&err, root, U ("c0"), xtree_node_type_ATOM);
+  xtree_node_t *c1 = xtree_node_new (&err, root, U ("c1"), xtree_node_type_ATOM);
+  xtree_node_t *c2 = xtree_node_new (&err, root, U ("c2"), xtree_node_type_ATOM);
 
   if (!c0 || !c1 || !c2) {
     PERROR("Failed to create children\n");
@@ -1177,7 +1190,7 @@ int test_child_find (void)
   }
 
   // A node not in the tree should return (size_t)-1
-  xtree_node_t *stranger = xtree_node_new (&err, NULL, "stranger", xtree_node_type_ATOM);
+  xtree_node_t *stranger = xtree_node_new (&err, NULL, U ("stranger"), xtree_node_type_ATOM);
   if (!stranger) {
     PERROR("Failed to create stranger node\n");
     goto cleanup;
@@ -1211,11 +1224,11 @@ int test_child_append_api (void)
     goto cleanup;
   }
 
-  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  xtree_node_t *root = xtree_node_new (&err, NULL, U ("root"), xtree_node_type_LIST);
   if (!root) goto cleanup;
 
-  xtree_node_t *a = xtree_node_new (&err, NULL, "a", xtree_node_type_ATOM);
-  xtree_node_t *b = xtree_node_new (&err, NULL, "b", xtree_node_type_ATOM);
+  xtree_node_t *a = xtree_node_new (&err, NULL, U ("a"), xtree_node_type_ATOM);
+  xtree_node_t *b = xtree_node_new (&err, NULL, U ("b"), xtree_node_type_ATOM);
   if (!a || !b) {
     PERROR("Failed to create standalone children\n");
     goto cleanup;
@@ -1266,23 +1279,23 @@ int test_child_append_invalid (void)
     goto cleanup;
   }
 
-  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  xtree_node_t *root = xtree_node_new (&err, NULL, U ("root"), xtree_node_type_LIST);
   if (!root) goto cleanup;
 
   // Appending NULL should fail
-  xtree_errobj_clrerr (&err);
+  xtree_errobj_reset (&err, 1024);
   if (xtree_node_child_append (&err, root, NULL) != NULL) {
     PERROR("Appending NULL child should return NULL\n");
     goto cleanup;
   }
 
   // Appending to a NULL parent should fail
-  xtree_node_t *orphan = xtree_node_new (&err, NULL, "orphan", xtree_node_type_ATOM);
+  xtree_node_t *orphan = xtree_node_new (&err, NULL, U ("orphan"), xtree_node_type_ATOM);
   if (!orphan) {
     PERROR("Failed to create orphan\n");
     goto cleanup;
   }
-  xtree_errobj_clrerr (&err);
+  xtree_errobj_reset (&err, 1024);
   if (xtree_node_child_append (&err, NULL, orphan) != NULL) {
     PERROR("Appending to NULL parent should return NULL\n");
     xtree_node_free (&orphan);
@@ -1291,15 +1304,15 @@ int test_child_append_invalid (void)
   xtree_node_free (&orphan);
 
   // Appending to an ATOM parent should fail
-  xtree_node_t *atom_parent = xtree_node_new (&err, NULL, "ap", xtree_node_type_ATOM);
-  xtree_node_t *child = xtree_node_new (&err, NULL, "c", xtree_node_type_ATOM);
+  xtree_node_t *atom_parent = xtree_node_new (&err, NULL, U ("ap"), xtree_node_type_ATOM);
+  xtree_node_t *child = xtree_node_new (&err, NULL, U ("c"), xtree_node_type_ATOM);
   if (!atom_parent || !child) {
     PERROR("Failed to create atom parent / child\n");
     xtree_node_free (&atom_parent);
     xtree_node_free (&child);
     goto cleanup;
   }
-  xtree_errobj_clrerr (&err);
+  xtree_errobj_reset (&err, 1024);
   if (xtree_node_child_append (&err, atom_parent, child) != NULL) {
     PERROR("Appending to ATOM parent should return NULL\n");
     xtree_node_free (&atom_parent);
@@ -1330,7 +1343,7 @@ int test_attr_count (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "node", xtree_node_type_LIST);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("node"), xtree_node_type_LIST);
   if (!node) {
     PERROR("Failed to create node\n");
     goto cleanup;
@@ -1341,9 +1354,9 @@ int test_attr_count (void)
     goto cleanup;
   }
 
-  xtree_node_attr_new (&err, node, "a", "1");
-  xtree_node_attr_new (&err, node, "b", "2");
-  xtree_node_attr_new (&err, node, "a", "3"); // duplicate name
+  xtree_node_attr_new (&err, node, U ("a"), U ("1"));
+  xtree_node_attr_new (&err, node, U ("b"), U ("2"));
+  xtree_node_attr_new (&err, node, U ("a"), U ("3")); // duplicate name
 
   if (xtree_node_attr_count (node) != 3) {
     PERROR("Expected 3 attributes, got %zu\n", xtree_node_attr_count (node));
@@ -1376,40 +1389,40 @@ int test_attr_value_get_named_ordinal (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "node", xtree_node_type_LIST);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("node"), xtree_node_type_LIST);
   if (!node) {
     PERROR("Failed to create node\n");
     goto cleanup;
   }
 
-  xtree_node_attr_new (&err, node, "color", "red");
-  xtree_node_attr_new (&err, node, "size",  "large");
-  xtree_node_attr_new (&err, node, "color", "blue"); // duplicate name
+  xtree_node_attr_new (&err, node, U ("color"), U ("red"));
+  xtree_node_attr_new (&err, node, U ("size"),  U ("large"));
+  xtree_node_attr_new (&err, node, U ("color"), U ("blue")); // duplicate name
 
   // The ordinal counts only attributes of the specified name: the 0th
   // "color" is "red", the 1st is "blue", and the duplicate "color"s do
   // not shift the 0th "size".
-  const char *c0 = xtree_node_attr_value_get (&err, node, "color", 0);
-  const char *c1 = xtree_node_attr_value_get (&err, node, "color", 1);
-  const char *s0 = xtree_node_attr_value_get (&err, node, "size", 0);
+  const unsigned char *c0 = xtree_node_attr_value_get (&err, node, U ("color"), 0);
+  const unsigned char *c1 = xtree_node_attr_value_get (&err, node, U ("color"), 1);
+  const unsigned char *s0 = xtree_node_attr_value_get (&err, node, U ("size"), 0);
 
-  if (!c0 || strcmp (c0, "red") != 0) {
-    PERROR("0th [color] expected [red], got [%s]\n", c0 ? c0 : "(null)");
+  if (!c0 || ustrcmp (c0, U ("red")) != 0) {
+    PERROR("0th [color] expected [red], got [%s]\n", c0 ? CS (c0) : "(null)");
     goto cleanup;
   }
-  if (!c1 || strcmp (c1, "blue") != 0) {
-    PERROR("1st [color] expected [blue], got [%s]\n", c1 ? c1 : "(null)");
+  if (!c1 || ustrcmp (c1, U ("blue")) != 0) {
+    PERROR("1st [color] expected [blue], got [%s]\n", c1 ? CS (c1) : "(null)");
     goto cleanup;
   }
-  if (!s0 || strcmp (s0, "large") != 0) {
-    PERROR("0th [size] expected [large], got [%s]\n", s0 ? s0 : "(null)");
+  if (!s0 || ustrcmp (s0, U ("large")) != 0) {
+    PERROR("0th [size] expected [large], got [%s]\n", s0 ? CS (s0) : "(null)");
     goto cleanup;
   }
 
   // Requesting the 2nd "color" when only two exist is out of bounds and
   // must return NULL with the error object set.
   xtree_errobj_reset (&err, 1024);
-  if (xtree_node_attr_value_get (&err, node, "color", 2) != NULL) {
+  if (xtree_node_attr_value_get (&err, node, U ("color"), 2) != NULL) {
     PERROR("Out-of-range ordinal should return NULL\n");
     goto cleanup;
   }
@@ -1420,14 +1433,14 @@ int test_attr_value_get_named_ordinal (void)
 
   // An unknown name must also fail.
   xtree_errobj_reset (&err, 1024);
-  if (xtree_node_attr_value_get (&err, node, "nonexistent", 0) != NULL) {
+  if (xtree_node_attr_value_get (&err, node, U ("nonexistent"), 0) != NULL) {
     PERROR("Unknown attribute name should return NULL\n");
     goto cleanup;
   }
 
   // Neither node nor name may be NULL.
   xtree_errobj_reset (&err, 1024);
-  if (xtree_node_attr_value_get (&err, NULL, "color", 0) != NULL) {
+  if (xtree_node_attr_value_get (&err, NULL, U ("color"), 0) != NULL) {
     PERROR("NULL node should return NULL\n");
     goto cleanup;
   }
@@ -1458,30 +1471,30 @@ int test_attr_duplicate_names_get1_vs_ordinal (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "node", xtree_node_type_LIST);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("node"), xtree_node_type_LIST);
   if (!node) {
     PERROR("Failed to create node\n");
     goto cleanup;
   }
 
-  xtree_node_attr_new (&err, node, "k", "v1");
-  xtree_node_attr_new (&err, node, "k", "v2");
-  xtree_node_attr_new (&err, node, "k", "v3");
+  xtree_node_attr_new (&err, node, U ("k"), U ("v1"));
+  xtree_node_attr_new (&err, node, U ("k"), U ("v2"));
+  xtree_node_attr_new (&err, node, U ("k"), U ("v3"));
 
   // get1 returns the first match
-  const char *first = xtree_node_attr_value_get1 (&err, node, "k");
-  if (!first || strcmp (first, "v1") != 0) {
-    PERROR("get1 expected [v1], got [%s]\n", first ? first : "(null)");
+  const unsigned char *first = xtree_node_attr_value_get1 (&err, node, U ("k"));
+  if (!first || ustrcmp (first, U ("v1")) != 0) {
+    PERROR("get1 expected [v1], got [%s]\n", first ? CS (first) : "(null)");
     goto cleanup;
   }
 
   // The ordinal get should expose all three in insertion order
-  const char *i0 = xtree_node_attr_value_get (&err, node, "k", 0);
-  const char *i1 = xtree_node_attr_value_get (&err, node, "k", 1);
-  const char *i2 = xtree_node_attr_value_get (&err, node, "k", 2);
-  if (!i0 || strcmp (i0, "v1") != 0 ||
-      !i1 || strcmp (i1, "v2") != 0 ||
-      !i2 || strcmp (i2, "v3") != 0) {
+  const unsigned char *i0 = xtree_node_attr_value_get (&err, node, U ("k"), 0);
+  const unsigned char *i1 = xtree_node_attr_value_get (&err, node, U ("k"), 1);
+  const unsigned char *i2 = xtree_node_attr_value_get (&err, node, U ("k"), 2);
+  if (!i0 || ustrcmp (i0, U ("v1")) != 0 ||
+      !i1 || ustrcmp (i1, U ("v2")) != 0 ||
+      !i2 || ustrcmp (i2, U ("v3")) != 0) {
     PERROR("Ordinal duplicate attribute mismatch\n");
     goto cleanup;
   }
@@ -1512,11 +1525,11 @@ int test_parent_after_attach (void)
     goto cleanup;
   }
 
-  xtree_node_t *parent_a = xtree_node_new (&err, NULL, "a", xtree_node_type_LIST);
-  xtree_node_t *parent_b = xtree_node_new (&err, NULL, "b", xtree_node_type_LIST);
+  xtree_node_t *parent_a = xtree_node_new (&err, NULL, U ("a"), xtree_node_type_LIST);
+  xtree_node_t *parent_b = xtree_node_new (&err, NULL, U ("b"), xtree_node_type_LIST);
   if (!parent_a || !parent_b) goto cleanup;
 
-  xtree_node_t *child = xtree_node_new (&err, parent_a, "c", xtree_node_type_ATOM);
+  xtree_node_t *child = xtree_node_new (&err, parent_a, U ("c"), xtree_node_type_ATOM);
   if (!child) goto cleanup;
 
   if (xtree_node_parent (&err, child) != parent_a) {
@@ -1555,14 +1568,14 @@ int test_attr_new_null_params (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "node", xtree_node_type_LIST);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("node"), xtree_node_type_LIST);
   if (!node) {
     PERROR("Failed to create node\n");
     goto cleanup;
   }
 
   xtree_errobj_reset (&err, 1024);
-  if (xtree_node_attr_new (&err, NULL, "k", "v") != NULL) {
+  if (xtree_node_attr_new (&err, NULL, U ("k"), U ("v")) != NULL) {
     PERROR("attr_new with NULL node should return NULL\n");
     goto cleanup;
   }
@@ -1572,7 +1585,7 @@ int test_attr_new_null_params (void)
   }
 
   xtree_errobj_reset (&err, 1024);
-  if (xtree_node_attr_new (&err, node, NULL, "v") != NULL) {
+  if (xtree_node_attr_new (&err, node, NULL, U ("v")) != NULL) {
     PERROR("attr_new with NULL name should return NULL\n");
     goto cleanup;
   }
@@ -1582,7 +1595,7 @@ int test_attr_new_null_params (void)
   }
 
   xtree_errobj_reset (&err, 1024);
-  if (xtree_node_attr_new (&err, node, "k", NULL) != NULL) {
+  if (xtree_node_attr_new (&err, node, U ("k"), NULL) != NULL) {
     PERROR("attr_new with NULL value should return NULL\n");
     goto cleanup;
   }
@@ -1619,14 +1632,14 @@ int test_node_new_invalid_parent_and_type (void)
   }
 
   // The parent must be of type _LIST.
-  xtree_node_t *atom = xtree_node_new (&err, NULL, "atom", xtree_node_type_ATOM);
+  xtree_node_t *atom = xtree_node_new (&err, NULL, U ("atom"), xtree_node_type_ATOM);
   if (!atom) {
     PERROR("Failed to create atom node\n");
     goto cleanup;
   }
 
   xtree_errobj_reset (&err, 1024);
-  xtree_node_t *child = xtree_node_new (&err, atom, "child", xtree_node_type_ATOM);
+  xtree_node_t *child = xtree_node_new (&err, atom, U ("child"), xtree_node_type_ATOM);
   if (child != NULL) {
     PERROR("Creating a child under an ATOM parent should return NULL\n");
     xtree_node_free (&child);
@@ -1639,7 +1652,7 @@ int test_node_new_invalid_parent_and_type (void)
 
   // Only _ATOM and _LIST are allowable; out-of-range types must error too.
   xtree_errobj_reset (&err, 1024);
-  xtree_node_t *bad = xtree_node_new (&err, NULL, "bad",
+  xtree_node_t *bad = xtree_node_new (&err, NULL, U ("bad"),
                                       (enum xtree_node_type_t)999);
   if (bad != NULL) {
     PERROR("Creating a node with an out-of-range type should return NULL\n");
@@ -1672,29 +1685,29 @@ int test_value_append_no_existing (void)
     goto cleanup;
   }
 
-  xtree_node_t *node = xtree_node_new (&err, NULL, "atom", xtree_node_type_ATOM);
+  xtree_node_t *node = xtree_node_new (&err, NULL, U ("atom"), xtree_node_type_ATOM);
   if (!node) {
     PERROR("Failed to create node\n");
     goto cleanup;
   }
 
   // With no existing value, the appended string becomes the value.
-  const char *val = xtree_node_value_append (&err, node, "first");
-  if (!val || strcmp (val, "first") != 0) {
-    PERROR("Expected [first], got [%s]\n", val ? val : "(null)");
+  const unsigned char *val = xtree_node_value_append (&err, node, U ("first"));
+  if (!val || ustrcmp (val, U ("first")) != 0) {
+    PERROR("Expected [first], got [%s]\n", val ? CS (val) : "(null)");
     goto cleanup;
   }
-  const char *check = xtree_node_value_get (&err, node);
-  if (!check || strcmp (check, "first") != 0) {
+  const unsigned char *check = xtree_node_value_get (&err, node);
+  if (!check || ustrcmp (check, U ("first")) != 0) {
     PERROR("Value get after append mismatch, got [%s]\n",
-           check ? check : "(null)");
+           check ? CS (check) : "(null)");
     goto cleanup;
   }
 
   // And appending again concatenates onto it.
-  val = xtree_node_value_append (&err, node, " second");
-  if (!val || strcmp (val, "first second") != 0) {
-    PERROR("Expected [first second], got [%s]\n", val ? val : "(null)");
+  val = xtree_node_value_append (&err, node, U (" second"));
+  if (!val || ustrcmp (val, U ("first second")) != 0) {
+    PERROR("Expected [first second], got [%s]\n", val ? CS (val) : "(null)");
     goto cleanup;
   }
 
@@ -1718,10 +1731,10 @@ int test_free_detaches_from_parent (void)
     goto cleanup;
   }
 
-  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  xtree_node_t *root = xtree_node_new (&err, NULL, U ("root"), xtree_node_type_LIST);
   if (!root) goto cleanup;
 
-  xtree_node_t *child = xtree_node_new (&err, root, "child", xtree_node_type_ATOM);
+  xtree_node_t *child = xtree_node_new (&err, root, U ("child"), xtree_node_type_ATOM);
   if (!child) {
     PERROR("Failed to create child\n");
     goto cleanup;
@@ -1740,12 +1753,12 @@ int test_free_detaches_from_parent (void)
 
   // The header now documents that children are recursively freed, so
   // freeing a root with a subtree must be safe and complete.
-  xtree_node_t *mid = xtree_node_new (&err, root, "mid", xtree_node_type_LIST);
+  xtree_node_t *mid = xtree_node_new (&err, root, U ("mid"), xtree_node_type_LIST);
   if (!mid) {
     PERROR("Failed to create mid node\n");
     goto cleanup;
   }
-  if (!xtree_node_new (&err, mid, "leaf", xtree_node_type_ATOM)) {
+  if (!xtree_node_new (&err, mid, U ("leaf"), xtree_node_type_ATOM)) {
     PERROR("Failed to create leaf node\n");
     goto cleanup;
   }
@@ -1775,8 +1788,8 @@ int test_child_count_and_get_invalid (void)
     goto cleanup;
   }
 
-  xtree_node_t *atom = xtree_node_new (&err, NULL, "atom", xtree_node_type_ATOM);
-  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  xtree_node_t *atom = xtree_node_new (&err, NULL, U ("atom"), xtree_node_type_ATOM);
+  xtree_node_t *root = xtree_node_new (&err, NULL, U ("root"), xtree_node_type_LIST);
   if (!atom || !root) {
     PERROR("Failed to create nodes\n");
     goto cleanup;
@@ -1792,7 +1805,7 @@ int test_child_count_and_get_invalid (void)
     goto cleanup;
   }
 
-  if (!xtree_node_new (&err, root, "c1", xtree_node_type_ATOM)) {
+  if (!xtree_node_new (&err, root, U ("c1"), xtree_node_type_ATOM)) {
     PERROR("Failed to create child\n");
     goto cleanup;
   }
@@ -1837,7 +1850,7 @@ int test_parent_err_only_on_error (void)
     goto cleanup;
   }
 
-  xtree_node_t *root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  xtree_node_t *root = xtree_node_new (&err, NULL, U ("root"), xtree_node_type_LIST);
   if (!root) goto cleanup;
 
   // A root node has a NULL parent, but that is NOT an error: per the
@@ -1889,7 +1902,7 @@ int test_node_dump (void)
   xtree_node_t *empty = NULL;
   xtree_node_t *topatom = NULL;
 
-  /* Expected dump, using the same format produced by xtree_node_dump:
+  /* Expected dump, using the same format produced by xtree_node_dump_file:
    *
    *   - one space of indent per depth level
    *   - parent is printed as "No parent" for a root node, otherwise
@@ -1954,20 +1967,20 @@ int test_node_dump (void)
 
   /* Root: LIST "root" with a version attribute and two duplicate id
    * attributes, exercising ordered duplicate keys. */
-  root = xtree_node_new (&err, NULL, "root", xtree_node_type_LIST);
+  root = xtree_node_new (&err, NULL, U ("root"), xtree_node_type_LIST);
   if (!root) {
     PERROR ("Failed to create root node\n");
     goto cleanup;
   }
-  if (!xtree_node_attr_new (&err, root, "version", "1.0")) {
+  if (!xtree_node_attr_new (&err, root, U ("version"), U ("1.0"))) {
     PERROR ("Failed to add root attribute version\n");
     goto cleanup;
   }
-  if (!xtree_node_attr_new (&err, root, "id", "r1")) {
+  if (!xtree_node_attr_new (&err, root, U ("id"), U ("r1"))) {
     PERROR ("Failed to add root attribute id r1\n");
     goto cleanup;
   }
-  if (!xtree_node_attr_new (&err, root, "id", "r2")) {
+  if (!xtree_node_attr_new (&err, root, U ("id"), U ("r2"))) {
     PERROR ("Failed to add root attribute id r2\n");
     goto cleanup;
   }
@@ -1979,38 +1992,38 @@ int test_node_dump (void)
     PERROR ("Failed to create group node\n");
     goto cleanup;
   }
-  if (!xtree_node_attr_new (&err, group, "kind", "group")) {
+  if (!xtree_node_attr_new (&err, group, U ("kind"), U ("group"))) {
     PERROR ("Failed to add group attribute kind\n");
     goto cleanup;
   }
-  if (!xtree_node_attr_new (&err, group, "k", "v1")) {
+  if (!xtree_node_attr_new (&err, group, U ("k"), U ("v1"))) {
     PERROR ("Failed to add group attribute k v1\n");
     goto cleanup;
   }
-  if (!xtree_node_attr_new (&err, group, "k", "v2")) {
+  if (!xtree_node_attr_new (&err, group, U ("k"), U ("v2"))) {
     PERROR ("Failed to add group attribute k v2\n");
     goto cleanup;
   }
 
   /* Named ATOM with a value and duplicate tag attributes. */
-  leaf1 = xtree_node_new (&err, group, "leaf1", xtree_node_type_ATOM);
+  leaf1 = xtree_node_new (&err, group, U ("leaf1"), xtree_node_type_ATOM);
   if (!leaf1) {
     PERROR ("Failed to create leaf1 node\n");
     goto cleanup;
   }
-  if (!xtree_node_value_set (&err, leaf1, "alpha")) {
+  if (!xtree_node_value_set (&err, leaf1, U ("alpha"))) {
     PERROR ("Failed to set leaf1 value\n");
     goto cleanup;
   }
-  if (!xtree_node_attr_new (&err, leaf1, "id", "l1")) {
+  if (!xtree_node_attr_new (&err, leaf1, U ("id"), U ("l1"))) {
     PERROR ("Failed to add leaf1 attribute id\n");
     goto cleanup;
   }
-  if (!xtree_node_attr_new (&err, leaf1, "tag", "first")) {
+  if (!xtree_node_attr_new (&err, leaf1, U ("tag"), U ("first"))) {
     PERROR ("Failed to add leaf1 attribute tag first\n");
     goto cleanup;
   }
-  if (!xtree_node_attr_new (&err, leaf1, "tag", "second")) {
+  if (!xtree_node_attr_new (&err, leaf1, U ("tag"), U ("second"))) {
     PERROR ("Failed to add leaf1 attribute tag second\n");
     goto cleanup;
   }
@@ -2021,35 +2034,35 @@ int test_node_dump (void)
     PERROR ("Failed to create leaf2 node\n");
     goto cleanup;
   }
-  if (!xtree_node_value_set (&err, leaf2, "beta")) {
+  if (!xtree_node_value_set (&err, leaf2, U ("beta"))) {
     PERROR ("Failed to set leaf2 value\n");
     goto cleanup;
   }
 
   /* LIST with no attributes that contains a single empty LIST child. */
-  branch = xtree_node_new (&err, root, "branch", xtree_node_type_LIST);
+  branch = xtree_node_new (&err, root, U ("branch"), xtree_node_type_LIST);
   if (!branch) {
     PERROR ("Failed to create branch node\n");
     goto cleanup;
   }
 
-  empty = xtree_node_new (&err, branch, "empty", xtree_node_type_LIST);
+  empty = xtree_node_new (&err, branch, U ("empty"), xtree_node_type_LIST);
   if (!empty) {
     PERROR ("Failed to create empty node\n");
     goto cleanup;
   }
 
   /* Named ATOM sibling with a value and a single attribute. */
-  topatom = xtree_node_new (&err, root, "topatom", xtree_node_type_ATOM);
+  topatom = xtree_node_new (&err, root, U ("topatom"), xtree_node_type_ATOM);
   if (!topatom) {
     PERROR ("Failed to create topatom node\n");
     goto cleanup;
   }
-  if (!xtree_node_value_set (&err, topatom, "delta")) {
+  if (!xtree_node_value_set (&err, topatom, U ("delta"))) {
     PERROR ("Failed to set topatom value\n");
     goto cleanup;
   }
-  if (!xtree_node_attr_new (&err, topatom, "id", "t1")) {
+  if (!xtree_node_attr_new (&err, topatom, U ("id"), U ("t1"))) {
     PERROR ("Failed to add topatom attribute id\n");
     goto cleanup;
   }
@@ -2060,7 +2073,7 @@ int test_node_dump (void)
     goto cleanup;
   }
 
-  xtree_node_dump (root, outf, 0);
+  xtree_node_dump_file (root, outf, 0);
 
   if (fclose (outf) != 0) {
     PERROR ("Failed to close temporary dump file\n");
@@ -2099,6 +2112,150 @@ cleanup:
   return ret;
 }
 
+// name: test_node_dump_str
+int test_node_dump_str (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = { 0 };
+  FILE *outf = NULL;
+  char *fname = NULL;
+  char *from_file = NULL;
+  char *str = NULL;
+  char *str2 = NULL;
+
+  xtree_node_t *root = NULL;
+  xtree_node_t *leaf = NULL;
+  xtree_node_t *sub = NULL;
+
+  /* Same format as xtree_node_dump_file() at depth 0. */
+  static const char *expected =
+    "node:         (root)\n"
+    "node:type     [2]\n"
+    "node:parent   [No parent]\n"
+    "node:nattrs     2\n"
+    "node:root:attr[k:v1]\n"
+    "node:root:attr[k:v2]\n"
+    "node:nchildren  2\n"
+    " node:         (leaf)\n"
+    " node:type     [1]\n"
+    " node:parent   [root]\n"
+    " node:nattrs     1\n"
+    " node:leaf:attr[id:l1]\n"
+    " node:value  [alpha]\n"
+    " node:         ()\n"
+    " node:type     [2]\n"
+    " node:parent   [root]\n"
+    " node:nattrs     0\n"
+    " node:nchildren  0\n";
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR ("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  root = xtree_node_new (&err, NULL, U ("root"), xtree_node_type_LIST);
+  if (!root) {
+    PERROR ("Failed to create root node\n");
+    goto cleanup;
+  }
+  if (!xtree_node_attr_new (&err, root, U ("k"), U ("v1")) ||
+      !xtree_node_attr_new (&err, root, U ("k"), U ("v2"))) {
+    PERROR ("Failed to add root attributes\n");
+    goto cleanup;
+  }
+
+  leaf = xtree_node_new (&err, root, U ("leaf"), xtree_node_type_ATOM);
+  if (!leaf) {
+    PERROR ("Failed to create leaf node\n");
+    goto cleanup;
+  }
+  if (!xtree_node_value_set (&err, leaf, U ("alpha")) ||
+      !xtree_node_attr_new (&err, leaf, U ("id"), U ("l1"))) {
+    PERROR ("Failed to set up leaf node\n");
+    goto cleanup;
+  }
+
+  sub = xtree_node_new (&err, root, NULL, xtree_node_type_LIST);
+  if (!sub) {
+    PERROR ("Failed to create anonymous list node\n");
+    goto cleanup;
+  }
+
+  /* 1. The returned string matches the expected dump. */
+  str = xtree_node_dump_str (root, 0);
+  if (!str) {
+    PERROR ("xtree_node_dump_str returned NULL\n");
+    goto cleanup;
+  }
+  if (strcmp (str, expected) != 0) {
+    PERROR ("Dump string does not match expected output\n"
+            "--- expected ---\n%s"
+            "--- actual ---\n%s",
+            expected, str);
+    goto cleanup;
+  }
+
+  /* 2. The string dump must be identical to the file dump, at depth 0 and
+   *    at a non-zero depth. */
+  for (size_t depth = 0; depth < 3; depth += 2) {
+    if (depth) {
+      str2 = xtree_node_dump_str (root, depth);
+      if (!str2) {
+        PERROR ("xtree_node_dump_str returned NULL at depth %zu\n", depth);
+        goto cleanup;
+      }
+    }
+
+    if (!fdump (&fname, &outf)) {
+      PERROR ("Failed to create temporary dump file\n");
+      goto cleanup;
+    }
+    xtree_node_dump_file (root, outf, depth);
+    if (fclose (outf) != 0) {
+      PERROR ("Failed to close temporary dump file\n");
+      outf = NULL;
+      goto cleanup;
+    }
+    outf = NULL;
+
+    free (from_file);
+    from_file = fslurp (fname);
+    remove (fname);
+    free (fname);
+    fname = NULL;
+    if (!from_file) {
+      PERROR ("Failed to read temporary dump file\n");
+      goto cleanup;
+    }
+
+    const char *cmp = depth ? str2 : str;
+    if (strcmp (cmp, from_file) != 0) {
+      PERROR ("Dump string differs from dump file at depth %zu\n"
+              "--- file ---\n%s--- string ---\n%s",
+              depth, from_file, cmp);
+      goto cleanup;
+    }
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  if (outf)
+    fclose (outf);
+  if (fname) {
+    remove (fname);
+    free (fname);
+  }
+  free (from_file);
+  /* *dst and the return value are the same buffer: free it once. */
+  free (str);
+  free (str2);
+  xtree_node_free (&root);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
 // name: test_child_append_reparents
 int test_child_append_reparents (void)
 {
@@ -2110,11 +2267,11 @@ int test_child_append_reparents (void)
     goto cleanup;
   }
 
-  xtree_node_t *parent_a = xtree_node_new (&err, NULL, "parent_a", xtree_node_type_LIST);
-  xtree_node_t *parent_b = xtree_node_new (&err, NULL, "parent_b", xtree_node_type_LIST);
+  xtree_node_t *parent_a = xtree_node_new (&err, NULL, U ("parent_a"), xtree_node_type_LIST);
+  xtree_node_t *parent_b = xtree_node_new (&err, NULL, U ("parent_b"), xtree_node_type_LIST);
   if (!parent_a || !parent_b) goto cleanup;
 
-  xtree_node_t *child = xtree_node_new (&err, parent_a, "child", xtree_node_type_ATOM);
+  xtree_node_t *child = xtree_node_new (&err, parent_a, U ("child"), xtree_node_type_ATOM);
   if (!child) goto cleanup;
 
   if (xtree_node_child_count (parent_a) != 1) {
@@ -2265,7 +2422,7 @@ int test_reader_create_free (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)"abc");
+  reader = xtree_reader_str ("test", U ("abc"));
   if (!reader) {
     PERROR ("Failed to create reader from string\n");
     goto cleanup;
@@ -2291,7 +2448,7 @@ int test_reader_free_null_safety (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)"abc");
+  reader = xtree_reader_str ("test", U ("abc"));
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2340,7 +2497,7 @@ int test_reader_empty_input (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)"");
+  reader = xtree_reader_str ("test", U (""));
   if (!reader) {
     PERROR ("Failed to create reader from the empty string\n");
     goto cleanup;
@@ -2374,7 +2531,7 @@ int test_reader_get_sequence (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)"abc");
+  reader = xtree_reader_str ("test", U ("abc"));
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2402,7 +2559,7 @@ int test_reader_eof_transitions (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)"x");
+  reader = xtree_reader_str ("test", U ("x"));
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2448,7 +2605,7 @@ int test_reader_peek_no_advance (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)"xy");
+  reader = xtree_reader_str ("test", U ("xy"));
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2503,7 +2660,7 @@ int test_reader_whitespace_returned (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)" \t\r\n x ");
+  reader = xtree_reader_str ("test", U (" \t\r\n x "));
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2540,7 +2697,7 @@ int test_reader_whitespace_only_input (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)"  \n\t");
+  reader = xtree_reader_str ("test", U ("  \n\t"));
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2576,7 +2733,7 @@ int test_reader_peek_whitespace (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)" x");
+  reader = xtree_reader_str ("test", U (" x"));
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2615,7 +2772,7 @@ int test_reader_line_tracking (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)"a\nb\n\nc");
+  reader = xtree_reader_str ("test", U ("a\nb\n\nc"));
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2665,8 +2822,8 @@ int test_reader_cpos_tracking (void)
   xtree_reader_t *reader = NULL;
   xtree_reader_t *multi = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)"abc");
-  multi = xtree_reader_str ("test", (const unsigned char *)"ab\ncd");
+  reader = xtree_reader_str ("test", U ("abc"));
+  multi = xtree_reader_str ("test", U ("ab\ncd"));
   if (!reader || !multi) {
     PERROR ("Failed to create readers\n");
     goto cleanup;
@@ -2731,7 +2888,7 @@ int test_reader_unget_basic (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)"ab");
+  reader = xtree_reader_str ("test", U ("ab"));
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2805,7 +2962,7 @@ int test_reader_unget_restores_position (void)
   size_t lines[3];
   size_t cposs[3];
 
-  reader = xtree_reader_str ("test", (const unsigned char *)"a\nb");
+  reader = xtree_reader_str ("test", U ("a\nb"));
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2865,7 +3022,7 @@ int test_reader_unget_whitespace (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)"a b\nc");
+  reader = xtree_reader_str ("test", U ("a b\nc"));
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -2971,8 +3128,8 @@ int test_reader_unget_after_eof (void)
   xtree_reader_t *reader = NULL;
   xtree_reader_t *empty = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)"ab");
-  empty = xtree_reader_str ("test", (const unsigned char *)"");
+  reader = xtree_reader_str ("test", U ("ab"));
+  empty = xtree_reader_str ("test", U (""));
   if (!reader || !empty) {
     PERROR ("Failed to create readers\n");
     goto cleanup;
@@ -3077,8 +3234,8 @@ int test_reader_independent_readers (void)
   xtree_reader_t *r1 = NULL;
   xtree_reader_t *r2 = NULL;
 
-  r1 = xtree_reader_str ("one", (const unsigned char *)"abc");
-  r2 = xtree_reader_str ("two", (const unsigned char *)"abc");
+  r1 = xtree_reader_str ("one", U ("abc"));
+  r2 = xtree_reader_str ("two", U ("abc"));
   if (!r1 || !r2) {
     PERROR ("Failed to create readers\n");
     goto cleanup;
@@ -3123,7 +3280,7 @@ int test_reader_error_none_on_success (void)
   xtree_reader_t *reader = NULL;
   const struct xtree_errobj_t *err = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)"a b\nc");
+  reader = xtree_reader_str ("test", U ("a b\nc"));
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -3179,7 +3336,7 @@ int test_reader_error_query_idempotent (void)
   int ret = EXIT_FAILURE;
   xtree_reader_t *reader = NULL;
 
-  reader = xtree_reader_str ("test", (const unsigned char *)"ab");
+  reader = xtree_reader_str ("test", U ("ab"));
   if (!reader) {
     PERROR ("Failed to create reader\n");
     goto cleanup;
@@ -3715,6 +3872,7 @@ struct jsn_exp {
 static const char *jsn_idname (enum xtree_json_token_id_t id)
 {
   switch (id) {
+    case xtree_json_token_RESERVED:       return "RESERVED";
     case xtree_json_token_ERROR:          return "ERROR";
     case xtree_json_token_EOF:            return "EOF";
     case xtree_json_token_LBRACE:         return "LBRACE";
@@ -3817,7 +3975,7 @@ static bool jsn_check_token (xtree_reader_t *reader, enum xtree_json_token_id_t 
             jsn_idname (gid), (int)gid, dumphex ((const unsigned char *)gt, 2));
     goto cleanup;
   }
-  if (!gtext || strcmp ((char *)gtext, (char *)text) != 0) {
+  if (!gtext || ustrcmp (gtext, text) != 0) {
     PERROR ("For input [%.80s] token %zu: expected id [%s] (%d) with text "
             "[%.80s], got id [%s] (%d) with text [%.80s]\n",
             dumphex((const unsigned char *)jsn_cur_input, 0), jsn_cur_idx, jsn_idname (id), (int)id,
@@ -3828,7 +3986,7 @@ static bool jsn_check_token (xtree_reader_t *reader, enum xtree_json_token_id_t 
   if (!gname || strcmp (gname, JSN_NAME) != 0) {
     PERROR ("For input [%.80s] token %zu [%s] text [%.80s]: expected "
             "filename [%s], got [%s]\n", dumphex((const unsigned char *)jsn_cur_input, 0), jsn_cur_idx,
-            jsn_idname (id), text, JSN_NAME, gname ? gname : "(null)");
+            jsn_idname (id), text, JSN_NAME, gname ? CS (gname) : "(null)");
     goto cleanup;
   }
   if (gline != line || gcpos != cpos) {
@@ -3859,7 +4017,7 @@ cleanup:
 static bool jsn_check_eof (xtree_reader_t *reader)
 {
   for (size_t i=0; i<2; i++) {
-    if (!jsn_check_token (reader, xtree_json_token_EOF, (const unsigned char *)"",
+    if (!jsn_check_token (reader, xtree_json_token_EOF, U (""),
                           JSN_AT_READER, JSN_AT_READER))
       return false;
   }
@@ -4642,7 +4800,7 @@ int test_json_scan_token_filename (void)
   // hard-coded filename in the scanner would be caught.)
   int ret = EXIT_FAILURE;
   static const char *const name = "dir/other-name.json";
-  xtree_reader_t *reader = xtree_reader_str (name, (const unsigned char *)"[1]");
+  xtree_reader_t *reader = xtree_reader_str (name, U ("[1]"));
   xtree_scan_token_t *tok = NULL;
 
   if (!reader) {
@@ -4659,7 +4817,7 @@ int test_json_scan_token_filename (void)
     const char *got = xtree_scan_token_filename (tok);
     if (!got || strcmp (got, name) != 0) {
       PERROR ("Token %zu: expected filename [%s], got [%s]\n",
-              i, name, got ? got : "(null)");
+              i, name, got ? CS (got) : "(null)");
       goto cleanup;
     }
     xtree_scan_token_free (&tok);
@@ -5448,7 +5606,7 @@ int test_json_scan_tokens_independent (void)
   // Tokens own their data: freeing one must not disturb another, and
   // both must survive the reader being freed.
   int ret = EXIT_FAILURE;
-  xtree_reader_t *reader = xtree_reader_str (JSN_NAME, (const unsigned char *)"\"a\",");
+  xtree_reader_t *reader = xtree_reader_str (JSN_NAME, U ("\"a\","));
   xtree_scan_token_t *t1 = NULL;
   xtree_scan_token_t *t2 = NULL;
 
@@ -5468,7 +5626,7 @@ int test_json_scan_tokens_independent (void)
 
   const unsigned char *text = xtree_scan_token_text (t1);
   if (xtree_scan_token_id (t1) != xtree_json_token_STRING ||
-      !text || strcmp ((char *)text, "a") != 0) {
+      !text || ustrcmp (text, U ("a")) != 0) {
     PERROR ("First token is wrong after the reader was freed\n");
     goto cleanup;
   }
@@ -5478,7 +5636,7 @@ int test_json_scan_tokens_independent (void)
 
   text = xtree_scan_token_text (t2);
   if (xtree_scan_token_id (t2) != xtree_json_token_COMMA ||
-      !text || strcmp ((char *)text, ",") != 0) {
+      !text || ustrcmp (text, U (",")) != 0) {
     PERROR ("Second token is wrong after the first was deleted\n");
     goto cleanup;
   }
@@ -5595,23 +5753,23 @@ int test_json_scan_many_tokens (void)
   size_t line0 = xtree_reader_line (reader);
   size_t cpos0 = xtree_reader_cpos (reader);
 
-  if (!jsn_check_token (reader, xtree_json_token_LBRACKET, (const unsigned char *)"[",
+  if (!jsn_check_token (reader, xtree_json_token_LBRACKET, U ("["),
                         line0, cpos0))
     goto cleanup;
   for (size_t i=0; i<count; i++) {
-    if (!jsn_check_token (reader, xtree_json_token_NUMBER, (const unsigned char *)"0",
+    if (!jsn_check_token (reader, xtree_json_token_NUMBER, U ("0"),
                           line0, cpos0 + 1 + 2 * i)) {
       PERROR ("Number %zu was wrong\n", i);
       goto cleanup;
     }
     if (i + 1 < count &&
-        !jsn_check_token (reader, xtree_json_token_COMMA, (const unsigned char *)",",
+        !jsn_check_token (reader, xtree_json_token_COMMA, U (","),
                           line0, cpos0 + 2 + 2 * i)) {
       PERROR ("Comma %zu was wrong\n", i);
       goto cleanup;
     }
   }
-  if (!jsn_check_token (reader, xtree_json_token_RBRACKET, (const unsigned char *)"]",
+  if (!jsn_check_token (reader, xtree_json_token_RBRACKET, U ("]"),
                         line0, cpos0 + 2 * count))
     goto cleanup;
   if (!jsn_check_eof (reader))
@@ -5624,6 +5782,1601 @@ cleanup:
   free (buf);
   return ret;
 }
+
+/* ------------------------------------------------------------------
+ * Tests for xtree_scan_token_dump()
+ *
+ * The dump is a sequence of `name: value\n` lines, one per token field.
+ * The expected strings below are literals. If one of them is wrong, the
+ * failure message prints the actual output: check it, and if it is
+ * correct, copy it into the literal.
+ * ------------------------------------------------------------------ */
+
+/* Dump `tok` into *dst and compare the result with `expected`. Also checks
+ * that the return value is the same buffer as *dst. */
+static bool tdump_check (const xtree_scan_token_t *tok, unsigned char **dst,
+                         const char *expected)
+{
+  unsigned char *res = xtree_scan_token_dump (tok, dst);
+
+  if (!res || res != *dst) {
+    PERROR ("xtree_scan_token_dump returned %p, *dst is %p\n",
+            (void *)res, (void *)*dst);
+    return false;
+  }
+  if (strcmp ((const char *)*dst, expected) != 0) {
+    PERROR ("Dump does not match expected output\n"
+            "--- expected ---\n%s"
+            "--- actual ---\n%s",
+            expected, (const char *)*dst);
+    return false;
+  }
+  return true;
+}
+
+// name: test_scan_token_dump
+int test_scan_token_dump (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_scan_token_t *tok1 = NULL;
+  xtree_scan_token_t *tok2 = NULL;
+  unsigned char *dst = NULL;
+
+  static const char *const expected1 =
+    "token-id:        42\n"
+    "token-text:      [hello]\n"
+    "token-filename:  [dump-test.json]\n"
+    "token-line:      [7]\n"
+    "token-cpos:      [13]";
+
+  static const char *const expected2 =
+    "token-id:        -1\n"
+    "token-text:      []\n"
+    "token-filename:  [other.txt]\n"
+    "token-line:      [123]\n"
+    "token-cpos:      [456]";
+
+  tok1 = xtree_scan_token_new (42, "dump-test.json", 7, 13, U ("hello"), 5);
+  tok2 = xtree_scan_token_new (-1, "other.txt", 123, 456, U (""), 0);
+  if (!tok1 || !tok2) {
+    PERROR ("Failed to create tokens\n");
+    goto cleanup;
+  }
+
+  /* Dump into a NULL destination. */
+  if (!tdump_check (tok1, &dst, expected1))
+    goto cleanup;
+
+  /* Dump into a destination that already holds a dump: it is replaced,
+   * not appended to. */
+  if (!tdump_check (tok2, &dst, expected2))
+    goto cleanup;
+  if (!tdump_check (tok1, &dst, expected1))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  free (dst);
+  xtree_scan_token_free (&tok1);
+  xtree_scan_token_free (&tok2);
+  return ret;
+}
+
+/* Recursively append a compact representation of `node` to *out (which
+ * must be heap-allocated, see ds_str_append()): one line per node, one
+ * space of indent per depth level, the node's name in parentheses and, for
+ * ATOM nodes, the value in square brackets. Returns false on error. */
+static bool nv_dump (struct xtree_errobj_t *err, xtree_node_t *node,
+                     size_t depth, char **out)
+{
+  const unsigned char *name = xtree_node_name_get (node);
+  enum xtree_node_type_t type = xtree_node_type_get (node);
+
+  for (size_t i=0; i<depth; i++) {
+    if (!ds_str_append (out, " ", NULL))
+      return false;
+  }
+  if (!ds_str_append (out, "(", name ? CS (name) : "", ")", NULL))
+    return false;
+
+  if (type == xtree_node_type_ATOM) {
+    const unsigned char *value = xtree_node_value_get (err, node);
+    if (!ds_str_append (out, " [", value ? CS (value) : "", "]", NULL))
+      return false;
+  }
+  if (!ds_str_append (out, "\n", NULL))
+    return false;
+
+  if (type == xtree_node_type_LIST) {
+    size_t nchildren = xtree_node_child_count (node);
+    for (size_t i=0; i<nchildren; i++) {
+      xtree_node_t *child = xtree_node_child_get (err, node, i);
+      if (!child || !nv_dump (err, child, depth + 1, out))
+        return false;
+    }
+  }
+  return true;
+}
+
+/* Produce a compact string representation of a tree, for example
+ *
+ *   (object)
+ *    (field)
+ *     (aa) []
+ *     (number) [11]
+ *
+ * Returns a heap-allocated string that the caller must free, or NULL on
+ * error. */
+static char *node_dump_nv (struct xtree_errobj_t *err, xtree_node_t *node)
+{
+  char *out = node ? ds_str_dup ("") : NULL;
+
+  if (!out)
+    return NULL;
+  if (!nv_dump (err, node, 0, &out)) {
+    free (out);
+    return NULL;
+  }
+  return out;
+}
+
+/* ****************************************************************************
+ * The JSON parser is pretty relaxed: allows trailing commas, symbols, etc.
+ * See the header json_scan.h.
+ * The expected output is produced by node_dump_nv(): only the node name and
+ * (for atoms) the node value are shown, with indentation showing the depth.
+ * All xtree strings are unsigned char *, hence the casts below.
+ */
+int test_json_parse_happy (void)
+{
+  int ret = EXIT_FAILURE;
+
+  static const unsigned char *obj1 = (const unsigned char *)
+    "{\n"
+    "  \"aa\": 11,\n"
+    "  \"bb\": 22\n"
+    "}";
+
+  static const unsigned char *obj1_exp = (const unsigned char *)
+    "(object)\n"
+    " (field)\n"
+    "  (aa) []\n"
+    "  (number) [11]\n"
+    " (field)\n"
+    "  (bb) []\n"
+    "  (number) [22]\n";
+
+  static const unsigned char *obj2 = (const unsigned char *)
+    "{\n"
+    "  \"aa\": 1111,\n"
+    "  \"bb\": {\n"
+    "    \"cc\": 2222,\n"
+    "    \"dd\": 3333,\n"
+    "   }\n"
+    "}";
+
+  static const unsigned char *obj2_exp = (const unsigned char *)
+    "(object)\n"
+    " (field)\n"
+    "  (aa) []\n"
+    "  (number) [1111]\n"
+    " (field)\n"
+    "  (bb) []\n"
+    "  (object)\n"
+    "   (field)\n"
+    "    (cc) []\n"
+    "    (number) [2222]\n"
+    "   (field)\n"
+    "    (dd) []\n"
+    "    (number) [3333]\n";
+
+  static const unsigned char *obj3 = (const unsigned char *)
+    "{\n"
+    "  \"aaa\": 777,\n"
+    "  \"bbb\": {\n"
+    "    \"ccc\": \"some-string-1\",\n"
+    "    \"ddd\": true,\n"
+    "   },"
+    "  \"eee\": symbol-1,\n"
+    "  \"fff\": -12.55,\n"
+    "}";
+
+  static const unsigned char *obj3_exp = (const unsigned char *)
+    "(object)\n"
+    " (field)\n"
+    "  (aaa) []\n"
+    "  (number) [777]\n"
+    " (field)\n"
+    "  (bbb) []\n"
+    "  (object)\n"
+    "   (field)\n"
+    "    (ccc) []\n"
+    "    (string) [some-string-1]\n"
+    "   (field)\n"
+    "    (ddd) []\n"
+    "    (bool) [true]\n"
+    " (field)\n"
+    "  (eee) []\n"
+    "  (symbol) [symbol-1]\n"
+    " (field)\n"
+    "  (fff) []\n"
+    "  (number) [-12.55]\n";
+
+  static const unsigned char *array1 = (const unsigned char *)
+    "[\n"
+    "  \"aa\", true,\n"
+    "  \"bb\", false\n"
+    "]";
+
+  static const unsigned char *array1_exp = (const unsigned char *)
+    "(array)\n"
+    " (string) [aa]\n"
+    " (bool) [true]\n"
+    " (string) [bb]\n"
+    " (bool) [false]\n";
+
+  static const unsigned char *array2 = (const unsigned char *)
+    "[\n"
+    "  \"a2-1\", NaN,\n"
+    "  \"a2-2\", {\n"
+    "     \"a2-2-1\": undefined,\n"
+    "     \"a2-2-2\": [ A, B, C, D ],\n"
+    "   }\n"
+    // TODO: This will be suppored in a future version
+    // "  // Comments are allowed...\n"
+    "  \"a2-3\", \"a2-3 text\",\n"
+    "]";
+
+  static const unsigned char *array2_exp = (const unsigned char *)
+    "(array)\n"
+    " (string) [a2-1]\n"
+    " (number) [NaN]\n"
+    " (string) [a2-2]\n"
+    " (object)\n"
+    "  (field)\n"
+    "   (a2-2-1) []\n"
+    "   (reference) [undefined]\n"
+    "  (field)\n"
+    "   (a2-2-2) []\n"
+    "   (array)\n"
+    "    (symbol) [A]\n"
+    "    (symbol) [B]\n"
+    "    (symbol) [C]\n"
+    "    (symbol) [D]\n"
+    " (string) [a2-3]\n"
+    " (string) [a2-3 text]\n";
+
+  const struct {
+    const char *name;
+    const unsigned char *input;
+    const unsigned char *exp;
+  } tests[] = {
+    { "happy object1", obj1,   obj1_exp   },
+    { "happy object2", obj2,   obj2_exp   },
+    { "happy object3", obj3,   obj3_exp   },
+    { "happy array1",  array1, array1_exp },
+    { "happy array2",  array2, array2_exp },
+  };
+  size_t ntests = sizeof tests / sizeof tests[0];
+
+  struct xtree_errobj_t err = { 0 };
+  xtree_reader_t *reader = NULL;
+  xtree_node_t *node = NULL;
+  char *tmp = NULL;
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR ("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  for (size_t i=0; i<ntests; i++) {
+    xtree_reader_free (&reader);
+    xtree_node_free (&node);
+    if (!(reader = xtree_reader_str (tests[i].name, tests[i].input))) {
+      PERROR ("[%s]: Failed to create reader\n", tests[i].name);
+      goto cleanup;
+    }
+    if (!(node = xtree_json_parse (&err, reader, 2000))) {
+      PERROR ("[%s]: Failed to parse\n", tests[i].name);
+      goto cleanup;
+    }
+    free (tmp);
+    if (!(tmp = node_dump_nv (&err, node))) {
+      PERROR ("[%s]: Failed to dump\n", tests[i].name);
+      goto cleanup;
+    }
+    if (ustrcmp (U (tmp), tests[i].exp) != 0) {
+      PERROR ("[%s]: Mismatch\n--- expected ---\n%s--- actual ---\n%s",
+              tests[i].name, CS (tests[i].exp), tmp);
+      goto cleanup;
+    }
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  if (err.syscode || err.libcode) {
+    PERROR ("Error: libcode=%i syscode=%i\n"
+            "libmsg=[%s]\n"
+            "sysmsg=[%s]\n"
+            "src=[%s:%i]\n"
+            "message=%zu bytes\n"
+            "%s\n",
+            err.libcode, err.syscode,
+            err.libmsg, err.sysmsg,
+            err.srcfile, err.srcline,
+            err.message_len,
+            err.message && err.message[0] ? err.message : "(No message)");
+  }
+  xtree_errobj_reset (&err, 0);
+  free (tmp);
+  xtree_node_free (&node);
+  xtree_reader_free (&reader);
+  return ret;
+}
+
+
+/* ------------------------------------------------------------------
+ * Edge-case tests for xtree_json_parse()
+ *
+ * Dialect (taken from xtree_json_scan.h and test_json_parse_happy):
+ *   - Strings: quotes stripped, escapes NOT decoded, may span lines (LF
+ *     becomes the two characters \n, CR becomes \r).
+ *   - Numbers are raw text (hex 0x, binary 0b, octal 0NN, ".5", "5.",
+ *     leading +). Neither the scanner nor the parser validates or
+ *     converts them: the tree is a lingua franca, so every NUMBER token
+ *     is stored verbatim as a (number) node, however malformed
+ *     ("1abc", "12..13", "0x", "08", "-", ...). Consumers decide what
+ *     a number means.
+ *   - NaN is a (number); undefined is a (reference); true/false are
+ *     (bool); unquoted words are (symbol).
+ *   - Trailing commas are accepted.
+ *   - Comments are NOT supported yet (planned): see
+ *     test_json_parse_comments_unsupported, which is not registered.
+ *
+ * Tests whose behaviour the headers do not pin down are kept out of the
+ * pass/fail list: see test_json_parse_probe (prints, never fails).
+ *
+ * Every failure case checks: NULL result, error object set (libcode or
+ * syscode) and well-formed. Run under ASan/valgrind too, so that the
+ * error paths are checked for leaks and double frees.
+ * ------------------------------------------------------------------ */
+
+#define JP_NAME "jp-test"
+
+struct jp_ok_case {
+  const char *input;
+  const char *exp;     /* node_dump_nv() output, or NULL: only check success */
+};
+
+/* Parse `input`. On return *node is NULL if the parse failed. Returns
+ * false only if the test machinery itself failed. */
+static bool jp_parse (const char *input, struct xtree_errobj_t *err,
+                      xtree_reader_t **reader, xtree_node_t **node,
+                      size_t maxdepth)
+{
+  if (!xtree_errobj_reset (err, 1024)) {
+    PERROR ("Failed to allocate error object\n");
+    return false;
+  }
+  *reader = xtree_reader_str (JP_NAME, (const unsigned char *)input);
+  if (!*reader) {
+    PERROR ("Failed to create reader\n");
+    return false;
+  }
+  *node = xtree_json_parse (err, *reader, maxdepth);
+  return true;
+}
+
+static void jp_cleanup (struct xtree_errobj_t *err, xtree_reader_t **reader,
+                        xtree_node_t **node)
+{
+  xtree_node_free (node);
+  xtree_reader_free (reader);
+  xtree_errobj_reset (err, 0);
+}
+
+/* Parse must succeed; if exp is not NULL the dump must match it. */
+static bool jp_expect_ok (const char *input, const char *exp)
+{
+  bool ok = false;
+  struct xtree_errobj_t err = { 0 };
+  xtree_reader_t *reader = NULL;
+  xtree_node_t *node = NULL;
+  char *dump = NULL;
+
+  jsn_set_input (input);
+  if (!jp_parse (input, &err, &reader, &node, 2000))
+    goto cleanup;
+  if (!node) {
+    PERROR ("Input [%.100s]: expected success, parse failed\n", jsn_cur_input);
+    rdr_print_errobj (&err);
+    goto cleanup;
+  }
+  if (exp) {
+    dump = node_dump_nv (&err, node);
+    if (!dump) {
+      PERROR ("Input [%.100s]: failed to dump tree\n", jsn_cur_input);
+      goto cleanup;
+    }
+    if (strcmp (dump, exp) != 0) {
+      PERROR ("Input [%.100s]: mismatch\n--- expected ---\n%s"
+              "--- actual ---\n%s", jsn_cur_input, exp, dump);
+      goto cleanup;
+    }
+  }
+  ok = true;
+
+cleanup:
+  free (dump);
+  jp_cleanup (&err, &reader, &node);
+  return ok;
+}
+
+/* Parse must fail cleanly: NULL result, well-formed error object set. */
+static bool jp_expect_fail (const char *input)
+{
+  bool ok = false;
+  struct xtree_errobj_t err = { 0 };
+  xtree_reader_t *reader = NULL;
+  xtree_node_t *node = NULL;
+
+  jsn_set_input (input);
+  if (!jp_parse (input, &err, &reader, &node, 2000))
+    goto cleanup;
+  if (node) {
+    char *dump = node_dump_nv (&err, node);
+    PERROR ("Input [%.100s]: expected failure, but parsed to:\n%s",
+            jsn_cur_input, dump ? dump : "(dump failed)\n");
+    free (dump);
+    goto cleanup;
+  }
+  if (!err.libcode && !err.syscode) {
+    PERROR ("Input [%.100s]: parse returned NULL without setting the "
+            "error object\n", jsn_cur_input);
+    goto cleanup;
+  }
+  if (!rdr_expect_wellformed_errobj (&err))
+    goto cleanup;
+  ok = true;
+
+cleanup:
+  jp_cleanup (&err, &reader, &node);
+  return ok;
+}
+
+static int jp_run_ok_cases (const struct jp_ok_case *c, size_t n)
+{
+  int rc = EXIT_SUCCESS;
+  for (size_t i=0; i<n; i++) {
+    if (!jp_expect_ok (c[i].input, c[i].exp))
+      rc = EXIT_FAILURE;
+  }
+  return rc;
+}
+
+static int jp_run_fail_cases (const char *const *c, size_t n)
+{
+  int rc = EXIT_SUCCESS;
+  for (size_t i=0; i<n; i++) {
+    if (!jp_expect_fail (c[i]))
+      rc = EXIT_FAILURE;
+  }
+  return rc;
+}
+
+// name: test_json_parse_empty_containers
+int test_json_parse_empty_containers (void)
+{
+  static const struct jp_ok_case cases[] = {
+    { "{}",            "(object)\n" },
+    { "[]",            "(array)\n" },
+    { " \t\r\n{ \n}\r\n ", "(object)\n" },
+    { " [ \n ] ",      "(array)\n" },
+    { "[[]]",          "(array)\n (array)\n" },
+    { "[{}]",          "(array)\n (object)\n" },
+    { "[[],{}]",       "(array)\n (array)\n (object)\n" },
+    { "[[[[]]]]",      "(array)\n (array)\n  (array)\n   (array)\n" },
+    { "{\"a\":{}}",
+      "(object)\n (field)\n  (a) []\n  (object)\n" },
+    { "{\"a\":[],\"b\":{}}",
+      "(object)\n"
+      " (field)\n  (a) []\n  (array)\n"
+      " (field)\n  (b) []\n  (object)\n" },
+  };
+  return jp_run_ok_cases (cases, JSN_N (cases));
+}
+
+// name: test_json_parse_trailing_commas
+int test_json_parse_trailing_commas (void)
+{
+  static const struct jp_ok_case cases[] = {
+    { "[1,]",          "(array)\n (number) [1]\n" },
+    { "[1,2,]",        "(array)\n (number) [1]\n (number) [2]\n" },
+    { "[\n 1,\n 2,\n]", "(array)\n (number) [1]\n (number) [2]\n" },
+    { "[[1,],]",       "(array)\n (array)\n  (number) [1]\n" },
+    { "{\"a\":1,}",    "(object)\n (field)\n  (a) []\n  (number) [1]\n" },
+    { "{\"a\":{\"b\":1,},}",
+      "(object)\n (field)\n  (a) []\n  (object)\n   (field)\n    (b) []\n"
+      "    (number) [1]\n" },
+    { "[ 1 , ]",       "(array)\n (number) [1]\n" },
+  };
+  return jp_run_ok_cases (cases, JSN_N (cases));
+}
+
+// name: test_json_parse_string_edge_cases
+int test_json_parse_string_edge_cases (void)
+{
+  /* Strings come back raw: no quotes, escapes untouched, newlines in the
+   * source rewritten to \n / \r by the scanner. The expected dumps below
+   * contain the backslash characters literally (so no real newline ever
+   * ends up in a dump line). */
+  static const struct jp_ok_case cases[] = {
+    { "[\"\"]",              "(array)\n (string) []\n" },
+    { "[\" \"]",             "(array)\n (string) [ ]\n" },
+    { "[\"a\\nb\"]",         "(array)\n (string) [a\\nb]\n" },     /* escape kept */
+    { "[\"a\nb\"]",          "(array)\n (string) [a\\nb]\n" },     /* LF rewritten */
+    { "[\"a\r\nb\"]",        "(array)\n (string) [a\\r\\nb]\n" },  /* CRLF rewritten */
+    { "[\"\n\n\"]",          "(array)\n (string) [\\n\\n]\n" },
+    { "[\"a\\\"b\"]",        "(array)\n (string) [a\\\"b]\n" },    /* escaped quote */
+    { "[\"a\\\\\"]",         "(array)\n (string) [a\\\\]\n" },     /* escaped backslash */
+    { "[\"\\u12G4 \\q \\x\"]", "(array)\n (string) [\\u12G4 \\q \\x]\n" }, /* invalid escapes ok */
+    { "[\"{}[]:,\"]",        "(array)\n (string) [{}[]:,]\n" },
+    { "[\"// not a comment\"]", "(array)\n (string) [// not a comment]\n" },
+    { "[\"true false null 12\"]", "(array)\n (string) [true false null 12]\n" },
+    { "[\"\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\"]",
+      "(array)\n (string) [\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80]\n" },
+    { "[\"a\tb\"]",          "(array)\n (string) [a\tb]\n" },
+    { "[\"a\",\"b\"]",       "(array)\n (string) [a]\n (string) [b]\n" },
+    /* keys may be any string, including empty and punctuation-heavy ones */
+    { "{\"\":1}",
+      "(object)\n (field)\n  () []\n  (number) [1]\n" },
+    { "{\"a b:c,d\":1}",
+      "(object)\n (field)\n  (a b:c,d) []\n  (number) [1]\n" },
+    { "{\"k\\n\":1}",
+      "(object)\n (field)\n  (k\\n) []\n  (number) [1]\n" },
+  };
+  return jp_run_ok_cases (cases, JSN_N (cases));
+}
+
+// name: test_json_parse_number_forms
+int test_json_parse_number_forms (void)
+{
+  /* All of these are valid numbers per the scanner header, and the raw
+   * text must survive unchanged. */
+  static const struct jp_ok_case cases[] = {
+    { "[0]",     "(array)\n (number) [0]\n" },
+    { "[-0]",    "(array)\n (number) [-0]\n" },
+    { "[+1]",    "(array)\n (number) [+1]\n" },
+    { "[.5]",    "(array)\n (number) [.5]\n" },
+    { "[5.]",    "(array)\n (number) [5.]\n" },
+    { "[-.5]",   "(array)\n (number) [-.5]\n" },
+    { "[1e+3]",  "(array)\n (number) [1e+3]\n" },
+    { "[1E-3]",  "(array)\n (number) [1E-3]\n" },
+    { "[-1.5E-3]", "(array)\n (number) [-1.5E-3]\n" },
+    { "[0x1F]",  "(array)\n (number) [0x1F]\n" },
+    { "[0XfF]",  "(array)\n (number) [0XfF]\n" },
+    { "[0b101]", "(array)\n (number) [0b101]\n" },
+    { "[0B1]",   "(array)\n (number) [0B1]\n" },
+    { "[017]",   "(array)\n (number) [017]\n" },
+    { "[12345678901234567890123456789012345678901234567890]",
+      "(array)\n (number) [12345678901234567890123456789012345678901234567890]\n" },
+    { "[NaN]",   "(array)\n (number) [NaN]\n" },
+    { "[1,2.5,-3e2]",
+      "(array)\n (number) [1]\n (number) [2.5]\n (number) [-3e2]\n" },
+    { "{\"a\":0x10}", "(object)\n (field)\n  (a) []\n  (number) [0x10]\n" },
+  };
+  return jp_run_ok_cases (cases, JSN_N (cases));
+}
+
+// name: test_json_parse_literals_and_symbols
+int test_json_parse_literals_and_symbols (void)
+{
+  static const struct jp_ok_case cases[] = {
+    { "[true,false]",
+      "(array)\n (bool) [true]\n (bool) [false]\n" },
+    { "[undefined]",  "(array)\n (reference) [undefined]\n" },
+    { "[A,B]",        "(array)\n (symbol) [A]\n (symbol) [B]\n" },
+    { "[$(ONE)]",     "(array)\n (symbol) [$(ONE)]\n" },
+    { "[a.b-c]",      "(array)\n (symbol) [a.b-c]\n" },
+    { "[x1,_y]",      "(array)\n (symbol) [x1]\n (symbol) [_y]\n" },
+    /* look-alikes of keywords are symbols, not keywords */
+    { "[truex,falsey,True,NULL]",
+      "(array)\n (symbol) [truex]\n (symbol) [falsey]\n (symbol) [True]\n"
+      " (symbol) [NULL]\n" },
+    { "[Nan,infinity,Undefined]",
+      "(array)\n (symbol) [Nan]\n (symbol) [infinity]\n (symbol) [Undefined]\n" },
+    /* null and Infinity: node names are not documented; check success */
+    { "[null]",       NULL },
+    { "[Infinity]",   NULL },
+    { "{\"a\":null}", NULL },
+  };
+  return jp_run_ok_cases (cases, JSN_N (cases));
+}
+
+// name: test_json_parse_structure_edge_cases
+int test_json_parse_structure_edge_cases (void)
+{
+  static const struct jp_ok_case cases[] = {
+    /* duplicate keys are kept, in order */
+    { "{\"a\":1,\"a\":2}",
+      "(object)\n (field)\n  (a) []\n  (number) [1]\n"
+      " (field)\n  (a) []\n  (number) [2]\n" },
+    /* no whitespace at all */
+    { "{\"a\":{\"b\":[1,2,{\"c\":true}]}}",
+      "(object)\n"
+      " (field)\n"
+      "  (a) []\n"
+      "  (object)\n"
+      "   (field)\n"
+      "    (b) []\n"
+      "    (array)\n"
+      "     (number) [1]\n"
+      "     (number) [2]\n"
+      "     (object)\n"
+      "      (field)\n"
+      "       (c) []\n"
+      "       (bool) [true]\n" },
+    /* mixed element types */
+    { "[1,\"two\",true,[3],{\"k\":4}]",
+      "(array)\n"
+      " (number) [1]\n"
+      " (string) [two]\n"
+      " (bool) [true]\n"
+      " (array)\n"
+      "  (number) [3]\n"
+      " (object)\n"
+      "  (field)\n"
+      "   (k) []\n"
+      "   (number) [4]\n" },
+    /* CRLF, tabs and blank lines everywhere */
+    { "\r\n\t[\r\n\r\n\t1\t,\r\n 2\r\n]\r\n\t",
+      "(array)\n (number) [1]\n (number) [2]\n" },
+    { "{\r\n  \"a\" \r\n : \r\n 1 \r\n}",
+      "(object)\n (field)\n  (a) []\n  (number) [1]\n" },
+    /* value that is a multi-line string inside an object */
+    { "{\"a\":\"x\ny\"}",
+      "(object)\n (field)\n  (a) []\n  (string) [x\\ny]\n" },
+  };
+  return jp_run_ok_cases (cases, JSN_N (cases));
+}
+
+// name: test_json_parse_fail_truncated
+int test_json_parse_fail_truncated (void)
+{
+  static const char *const cases[] = {
+    "[", "{", "[[", "{{", "[{", "{[",
+    "[1", "[1,", "[1,2", "[\"a\"", "[\"a\",",
+    "{\"a\"", "{\"a\":", "{\"a\":1", "{\"a\":1,", "{\"a\":1,\"b\"",
+    "{\"a\":[", "{\"a\":{", "{\"a\":[1,2", "{\"a\":{\"b\":1",
+    /* unterminated strings (the scanner reports ERROR) */
+    "\"", "\"abc", "[\"abc", "[\"abc]", "{\"a",
+    "{\"a:1}", "{\"a\":\"b", "[\"a\nb]", "[\"\\\"]", "[\"abc\\",
+  };
+  return jp_run_fail_cases (cases, JSN_N (cases));
+}
+
+// name: test_json_parse_fail_mismatched_and_stray
+int test_json_parse_fail_mismatched_and_stray (void)
+{
+  /* Each of these fails inside the first value, or because the first
+   * token cannot start a value. Input like "[]]" or "{}}" is NOT here:
+   * the first value is complete, so it parses and the stray closer is
+   * left in the reader for the next parse (see the stream tests). */
+  static const char *const cases[] = {
+    /* a token that cannot start a value */
+    "]", "}", ":", ",", "]]", "}{", "][", "]x", "},", ":1",
+    /* closer that does not match the opener */
+    "[}", "{]", "[1}", "{\"a\":1]", "[{]}", "{\"a\":[}", "{\"a\":[1}",
+    "{\"a\":{]}", "[}]", "{\"a\":[1,2}", "[[1,2}]",
+    /* unclosed at end of input (also covered by the truncated tests) */
+    "[[]", "[{}", "[[1],",
+  };
+  return jp_run_fail_cases (cases, JSN_N (cases));
+}
+
+#if 0
+// Leaving this in for reference - the implementation allows comma misuse like
+// this (leading, trailing commas, doubled-commas, etc).
+// name: test_json_parse_fail_comma_and_colon_misuse
+int test_json_parse_fail_comma_and_colon_misuse (void)
+{
+  static const char *const cases[] = {
+    /* leading and doubled commas (a trailing one is fine) */
+    "[,]", "[,1]", "[1,,2]", "[1,,]", "{,}", "{,\"a\":1}",
+    "{\"a\":1,,\"b\":2}", "{\"a\":1,,}",
+    /* missing or misplaced colons and values */
+    "{\"a\" 1}", "{\"a\"::1}", "{\"a\":}", "{\"a\":,}", "{:1}", "{:}",
+    "{\"a\"}", "{\"a\",1}", "{\"a\":1:2}", "{\"a\":\"b\":\"c\"}",
+    "[1:2]", "[:]", "[\"a\":1]",
+  };
+  return jp_run_fail_cases (cases, JSN_N (cases));
+}
+#endif
+
+// name: test_json_parse_fail_bad_keys
+int test_json_parse_fail_bad_keys (void)
+{
+  /* Containers are never keys. (Whether a bare number may be a key is
+   * not documented: see test_json_parse_probe.) */
+  static const char *const cases[] = {
+    "{[]:1}", "{{}:1}", "{[1]:1}", "{\"a\":1,[]:3}", "{\"a\":1,{}:3}",
+  };
+  return jp_run_fail_cases (cases, JSN_N (cases));
+}
+
+// name: test_json_parse_number_passthrough
+int test_json_parse_number_passthrough (void)
+{
+  /* Numbers are never validated or converted: any NUMBER token from the
+   * scanner (see test_json_scan_numbers_malformed) becomes a (number)
+   * node holding the raw text. */
+#define JP_NUM1(x)  { "[" x "]", "(array)\n (number) [" x "]\n" }
+  static const struct jp_ok_case cases[] = {
+    JP_NUM1 ("1abc"), JP_NUM1 ("1e"), JP_NUM1 ("1E"), JP_NUM1 ("1e+"),
+    JP_NUM1 ("1e-"), JP_NUM1 ("1.5e"), JP_NUM1 ("1.2.3"),
+    JP_NUM1 ("12..13"), JP_NUM1 ("123eb"), JP_NUM1 ("2026-10-25"),
+    JP_NUM1 ("1-2"), JP_NUM1 ("1+1"), JP_NUM1 ("1/2"),
+    /* slashes stay inside a number, "//" included: no comment starts */
+    JP_NUM1 ("1//2"), JP_NUM1 ("1//c"), JP_NUM1 ("-x//c"),
+    /* bad octal, hex and binary */
+    JP_NUM1 ("08"), JP_NUM1 ("09"), JP_NUM1 ("007e"), JP_NUM1 ("00.5"),
+    JP_NUM1 ("0x"), JP_NUM1 ("0X"), JP_NUM1 ("0b"), JP_NUM1 ("0B"),
+    JP_NUM1 ("0b2"), JP_NUM1 ("0b12"), JP_NUM1 ("0x1.8"), JP_NUM1 ("0xx"),
+    JP_NUM1 ("-0x"),
+    /* signs and dots with no digits */
+    JP_NUM1 ("-"), JP_NUM1 ("+"), JP_NUM1 ("."), JP_NUM1 (".."),
+    JP_NUM1 ("--1"), JP_NUM1 ("-+1"), JP_NUM1 ("+-1"), JP_NUM1 ("-a"),
+    JP_NUM1 ("+a"), JP_NUM1 ("-x"), JP_NUM1 (".e5"), JP_NUM1 ("-."),
+    JP_NUM1 ("+."),
+    /* as object values, and several in a row */
+    { "{\"a\":1abc}",
+      "(object)\n (field)\n  (a) []\n  (number) [1abc]\n" },
+    { "{\"a\":-}",
+      "(object)\n (field)\n  (a) []\n  (number) [-]\n" },
+    { "{\"a\":0x}",
+      "(object)\n (field)\n  (a) []\n  (number) [0x]\n" },
+    { "[1abc,0x,-,12..13]",
+      "(array)\n (number) [1abc]\n (number) [0x]\n (number) [-]\n"
+      " (number) [12..13]\n" },
+  };
+#undef JP_NUM1
+  return jp_run_ok_cases (cases, JSN_N (cases));
+}
+
+// name: test_json_parse_fail_unrecognised_tokens
+int test_json_parse_fail_unrecognised_tokens (void)
+{
+  static const char *const cases[] = {
+    "[|]", "[~]", "[`]", "[/]", "[/x]", "[a|b]", "[a/b]", "{/}",
+    "[\x01]", "[\x7f]", "[\xff]", "[\xc3\xa9]", "[caf\xc3\xa9]",
+    "[\xc2\xa0" "1]",                    /* NBSP is not whitespace */
+    "{\"a\":|}", "{|:1}", "{\"a\"|1}",
+  };
+  return jp_run_fail_cases (cases, JSN_N (cases));
+}
+
+// name: test_json_parse_null_params
+int test_json_parse_null_params (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = { 0 };
+  xtree_node_t *node = NULL;
+
+  if (!xtree_errobj_reset (&err, 1024)) {
+    PERROR ("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  node = xtree_json_parse (&err, NULL, 2000);
+  if (node) {
+    PERROR ("Parsing a NULL reader should return NULL\n");
+    goto cleanup;
+  }
+  if (!err.libcode && !err.syscode) {
+    PERROR ("Parsing a NULL reader should set the error object\n");
+    goto cleanup;
+  }
+  if (!rdr_expect_wellformed_errobj (&err))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_node_free (&node);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
+// name: test_json_parse_every_prefix_fails
+int test_json_parse_every_prefix_fails (void)
+{
+  /* The document is a single balanced container, so no proper prefix of
+   * it can be valid. Every prefix must fail cleanly (no crash, no
+   * success, error object set). Exercises every error path in the
+   * parser at every token boundary and in the middle of every token. */
+  static const char doc[] =
+    "{\"a\":[1,2.5,\"s\\n\",true,{\"b\":null}],"
+    "\"c\":{\"d\":-1e+3,},\"e\":[A,undefined,NaN,0x1F,],}";
+  int rc = EXIT_SUCCESS;
+  size_t len = strlen (doc);
+  char *prefix = malloc (len + 1);
+
+  if (!prefix) {
+    PERROR ("Failed to allocate prefix buffer\n");
+    return EXIT_FAILURE;
+  }
+
+  /* Sanity: the full document must parse. */
+  if (!jp_expect_ok (doc, NULL))
+    rc = EXIT_FAILURE;
+
+  for (size_t n=1; n<len; n++) {
+    memcpy (prefix, doc, n);
+    prefix[n] = '\0';
+    if (!jp_expect_fail (prefix)) {
+      PERROR ("Prefix length %zu failed\n", n);
+      rc = EXIT_FAILURE;
+    }
+  }
+
+  free (prefix);
+  return rc;
+}
+
+/* Build `depth` nested arrays: [[[...]]]. If `close` is false the closing
+ * brackets are omitted. */
+static char *jp_nested (size_t depth, bool close)
+{
+  char *buf = malloc (2 * depth + 1);
+  if (!buf)
+    return NULL;
+  memset (buf, '[', depth);
+  if (close)
+    memset (buf + depth, ']', depth);
+  buf[close ? 2 * depth : depth] = '\0';
+  return buf;
+}
+
+// name: test_json_parse_deep_nesting
+int test_json_parse_deep_nesting (void)
+{
+  int rc = EXIT_SUCCESS;
+
+  /* Moderate depth must work, and the result must have that depth. */
+  const size_t depth = 100;
+  char *good = jp_nested (depth, true);
+  if (!good) {
+    PERROR ("Failed to allocate input\n");
+    return EXIT_FAILURE;
+  }
+
+  struct xtree_errobj_t err = { 0 };
+  xtree_reader_t *reader = NULL;
+  xtree_node_t *node = NULL;
+
+  if (!jp_parse (good, &err, &reader, &node, 2000))
+    rc = EXIT_FAILURE;
+  else if (!node) {
+    PERROR ("Depth %zu should parse\n", depth);
+    rdr_print_errobj (&err);
+    rc = EXIT_FAILURE;
+  } else {
+    size_t d = 1;
+    xtree_node_t *cur = node;
+    while (xtree_node_child_count (cur) == 1) {
+      cur = xtree_node_child_get (&err, cur, 0);
+      if (!cur)
+        break;
+      d++;
+    }
+    if (d != depth) {
+      PERROR ("Expected nesting depth %zu, got %zu\n", depth, d);
+      rc = EXIT_FAILURE;
+    }
+  }
+  jp_cleanup (&err, &reader, &node);
+  free (good);
+
+  /* Unbalanced deep input must fail, not crash. */
+  char *open = jp_nested (5000, false);
+  if (!open) {
+    PERROR ("Failed to allocate input\n");
+    return EXIT_FAILURE;
+  }
+  if (!jp_expect_fail (open))
+    rc = EXIT_FAILURE;
+  free (open);
+
+  /* Very deep input: the parser may accept it or reject it with a clean
+   * error (e.g. a depth limit), but it must not crash or overflow the
+   * stack. Drop this part if the parser is intentionally recursive and
+   * unbounded. */
+  char *deep = jp_nested (20000, true);
+  if (!deep) {
+    PERROR ("Failed to allocate input\n");
+    return EXIT_FAILURE;
+  }
+  struct xtree_errobj_t err2 = { 0 };
+  xtree_reader_t *reader2 = NULL;
+  xtree_node_t *node2 = NULL;
+  if (!jp_parse (deep, &err2, &reader2, &node2, 8000))
+    rc = EXIT_FAILURE;
+  else if (!node2 && !err2.libcode && !err2.syscode) {
+    PERROR ("Depth 20000: NULL result without an error\n");
+    rc = EXIT_FAILURE;
+  }
+  jp_cleanup (&err2, &reader2, &node2);
+  free (deep);
+
+  return rc;
+}
+
+// name: test_json_parse_large_inputs
+int test_json_parse_large_inputs (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = { 0 };
+  xtree_reader_t *reader = NULL;
+  xtree_node_t *node = NULL;
+  char *buf = NULL;
+  char *want = NULL;
+  const size_t count = 5000;
+
+  /* 1. A large array: [0,1,2,...]. */
+  buf = malloc (count * 8 + 3);
+  if (!buf) {
+    PERROR ("Failed to allocate input\n");
+    goto cleanup;
+  }
+  size_t n = 0;
+  buf[n++] = '[';
+  for (size_t i=0; i<count; i++)
+    n += (size_t)sprintf (buf + n, "%s%zu", i ? "," : "", i);
+  buf[n++] = ']';
+  buf[n] = '\0';
+
+  if (!jp_parse (buf, &err, &reader, &node, 8000))
+    goto cleanup;
+  if (!node) {
+    PERROR ("Large array failed to parse\n");
+    rdr_print_errobj (&err);
+    goto cleanup;
+  }
+  if (xtree_node_child_count (node) != count) {
+    PERROR ("Large array: expected %zu children, got %zu\n",
+            count, xtree_node_child_count (node));
+    goto cleanup;
+  }
+  xtree_node_t *last = xtree_node_child_get (&err, node, count - 1);
+  const unsigned char *v = last ? xtree_node_value_get (&err, last) : NULL;
+  char expect_last[32];
+  snprintf (expect_last, sizeof expect_last, "%zu", count - 1);
+  if (!v || ustrcmp (v, U (expect_last)) != 0) {
+    PERROR ("Large array: wrong last value [%s]\n", v ? CS (v) : "(null)");
+    goto cleanup;
+  }
+  jp_cleanup (&err, &reader, &node);
+  free (buf);
+  buf = NULL;
+
+  /* 2. A large object: {"k0":0,"k1":1,...}: one field per key. */
+  buf = malloc (count * 24 + 3);
+  if (!buf) {
+    PERROR ("Failed to allocate input\n");
+    goto cleanup;
+  }
+  n = 0;
+  buf[n++] = '{';
+  for (size_t i=0; i<count; i++)
+    n += (size_t)sprintf (buf + n, "%s\"k%zu\":%zu", i ? "," : "", i, i);
+  buf[n++] = '}';
+  buf[n] = '\0';
+
+  if (!jp_parse (buf, &err, &reader, &node, 8000))
+    goto cleanup;
+  if (!node) {
+    PERROR ("Large object failed to parse\n");
+    rdr_print_errobj (&err);
+    goto cleanup;
+  }
+  if (xtree_node_child_count (node) != count) {
+    PERROR ("Large object: expected %zu fields, got %zu\n",
+            count, xtree_node_child_count (node));
+    goto cleanup;
+  }
+  jp_cleanup (&err, &reader, &node);
+  free (buf);
+  buf = NULL;
+
+  /* 3. One very long string value. */
+  const size_t slen = 100000;
+  buf = malloc (slen + 5);
+  want = malloc (slen + 1);
+  if (!buf || !want) {
+    PERROR ("Failed to allocate input\n");
+    goto cleanup;
+  }
+  for (size_t i=0; i<slen; i++)
+    want[i] = (char)('a' + (i % 26));
+  want[slen] = '\0';
+  sprintf (buf, "[\"%s\"]", want);
+
+  if (!jp_parse (buf, &err, &reader, &node, 2000))
+    goto cleanup;
+  if (!node) {
+    PERROR ("Long string failed to parse\n");
+    rdr_print_errobj (&err);
+    goto cleanup;
+  }
+  xtree_node_t *s = xtree_node_child_get (&err, node, 0);
+  const unsigned char *sv = s ? xtree_node_value_get (&err, s) : NULL;
+  if (!sv || ustrcmp (sv, U (want)) != 0) {
+    PERROR ("Long string value was corrupted\n");
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  jp_cleanup (&err, &reader, &node);
+  free (buf);
+  free (want);
+  return ret;
+}
+
+// name: test_json_parse_from_file
+int test_json_parse_from_file (void)
+{
+  /* Same parser, driven by xtree_reader_file(): the document is longer
+   * than any plausible reader buffer, so refills happen mid-token. */
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = { 0 };
+  xtree_reader_t *reader = NULL;
+  xtree_node_t *node = NULL;
+  char *fname = NULL;
+  char *data = NULL;
+  FILE *inf = NULL;
+  const size_t count = 3000;
+  size_t n = 0;
+
+  data = malloc (count * 24 + 64);
+  if (!data) {
+    PERROR ("Failed to allocate input\n");
+    goto cleanup;
+  }
+  n += (size_t)sprintf (data + n, "{\n  \"list\": [\n");
+  for (size_t i=0; i<count; i++)
+    n += (size_t)sprintf (data + n, "    \"item-%zu\",\n", i);
+  n += (size_t)sprintf (data + n, "  ],\n  \"last\": true\n}\n");
+
+  if (!rdr_write_tmpfile (data, n, &fname))
+    goto cleanup;
+  inf = fopen (fname, "rb");
+  if (!inf) {
+    PERROR ("Failed to reopen [%s]\n", fname);
+    goto cleanup;
+  }
+  if (!xtree_errobj_reset (&err, 1024)) {
+    PERROR ("Failed to allocate error object\n");
+    goto cleanup;
+  }
+  reader = xtree_reader_file (JP_NAME, inf);
+  if (!reader) {
+    PERROR ("Failed to create reader from file\n");
+    goto cleanup;
+  }
+  node = xtree_json_parse (&err, reader, 8000);
+  if (!node) {
+    PERROR ("Failed to parse file\n");
+    rdr_print_errobj (&err);
+    goto cleanup;
+  }
+  if (xtree_node_child_count (node) != 2) {
+    PERROR ("Expected 2 fields in root object, got %zu\n",
+            xtree_node_child_count (node));
+    goto cleanup;
+  }
+  xtree_node_t *field = xtree_node_child_get (&err, node, 0);
+  xtree_node_t *list = field ? xtree_node_child_get (&err, field, 1) : NULL;
+  if (!list || xtree_node_child_count (list) != count) {
+    PERROR ("Expected %zu list items, got %zu\n", count,
+            list ? xtree_node_child_count (list) : (size_t)0);
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  jp_cleanup (&err, &reader, &node);
+  if (inf)
+    fclose (inf);
+  if (fname) {
+    remove (fname);
+    free (fname);
+  }
+  free (data);
+  return ret;
+}
+
+/* ------------------------------------------------------------------
+ * Not in the default list. main() only knows tests that are in tests[],
+ * so to use these, add a TEST() line for them temporarily.
+ * ------------------------------------------------------------------ */
+
+// name: test_json_parse_probe
+int test_json_parse_probe (void)
+{
+  /* The headers do not say how the parser handles these. This prints what
+   * happens (to stderr, so the expected-output diff is unaffected) and
+   * never fails. Turn the cases you want to pin down into
+   * jp_expect_ok()/jp_expect_fail() cases once the intended behaviour is
+   * decided. */
+  static const char *const cases[] = {
+    /* scalars at the top level */
+    "42", "\"x\"", "true", "null", "A",
+    /* more than one value / trailing garbage */
+    "{} {}", "[] 1", "{} x", "[1] ]", "[1] \"unterminated",
+    /* missing commas (test_json_parse_happy has one after a '}') */
+    "[1 2]", "[\"a\" \"b\"]", "[{} {}]", "[[] []]", "{\"a\":1 \"b\":2}",
+    "{\"a\":{} \"b\":1}",
+    /* number keys */
+    "{1:2}", "{0x1:2}", "{-1:2}", "{1abc:2}", "{\"a\":1,2:3}",
+    /* symbol / keyword keys */
+    "{foo:1}", "{true:1}", "{null:1}", "{a.b:1}",
+    /* signed keywords: the scanner emits NUMBER then keyword */
+    "[-Infinity]", "[+Infinity]", "[-NaN]", "[+NaN]", "[-true]", "[+null]",
+    "[-Infinity2]",
+    /* number immediately followed by a symbol (NUMBER then SYMBOL) */
+    "[12px]", "[0xwxyz]", "[1_000]",
+    /* comments (planned): currently scanned as COMMENT tokens */
+    "[1, // c\n 2]", "// c\n[1]", "{\"a\":1 // c\n}",
+  };
+  for (size_t i=0; i<JSN_N (cases); i++) {
+    struct xtree_errobj_t err = { 0 };
+    xtree_reader_t *reader = NULL;
+    xtree_node_t *node = NULL;
+    char *dump = NULL;
+
+    jsn_set_input (cases[i]);
+    if (!jp_parse (cases[i], &err, &reader, &node, 2000)) {
+      jp_cleanup (&err, &reader, &node);
+      return EXIT_FAILURE;
+    }
+    if (node) {
+      dump = node_dump_nv (&err, node);
+      fprintf (stderr, "probe [%s]: OK\n%s", jsn_cur_input,
+               dump ? dump : "(dump failed)\n");
+    } else {
+      fprintf (stderr, "probe [%s]: FAIL libcode=%i (%s)\n", jsn_cur_input,
+               (int)err.libcode, err.libmsg);
+    }
+    free (dump);
+    jp_cleanup (&err, &reader, &node);
+  }
+  return EXIT_SUCCESS;
+}
+
+// name: test_json_parse_comments_unsupported
+int test_json_parse_comments_unsupported (void)
+{
+  /* Comments are planned for a future release. Until then the parser
+   * should reject them. When support lands, replace this test with
+   * positive cases (and note that the "TODO" in test_json_parse_happy's
+   * array2 can be enabled). Not registered by default. */
+  static const char *const cases[] = {
+    "[1, // c\n 2]", "// c\n[1]", "[1] // c", "{\"a\":1, // c\n}",
+    "{// c\n}", "[// c\n]",
+  };
+  return jp_run_fail_cases (cases, JSN_N (cases));
+}
+
+// name: test_json_parse_missing_commas
+int test_json_parse_missing_commas (void)
+{
+  /* Relaxed dialect: commas between array elements and object fields are
+   * optional. The colon between a key and its value is not. */
+  static const struct jp_ok_case cases[] = {
+    { "[1 2]",
+      "(array)\n (number) [1]\n (number) [2]\n" },
+    { "[\"a\" \"b\"]",
+      "(array)\n (string) [a]\n (string) [b]\n" },
+    { "[\"a\"\"b\"]",
+      "(array)\n (string) [a]\n (string) [b]\n" },
+    { "[true false A]",
+      "(array)\n (bool) [true]\n (bool) [false]\n (symbol) [A]\n" },
+    { "[{} {}]",   "(array)\n (object)\n (object)\n" },
+    { "[[] []]",   "(array)\n (array)\n (array)\n" },
+    { "[{}{}[][]]",
+      "(array)\n (object)\n (object)\n (array)\n (array)\n" },
+    { "[1,2 3,4]",
+      "(array)\n (number) [1]\n (number) [2]\n (number) [3]\n"
+      " (number) [4]\n" },
+    { "[1 2,]",    "(array)\n (number) [1]\n (number) [2]\n" },
+    { "{\"a\":1 \"b\":2}",
+      "(object)\n"
+      " (field)\n  (a) []\n  (number) [1]\n"
+      " (field)\n  (b) []\n  (number) [2]\n" },
+    { "{\"a\":{} \"b\":[]}",
+      "(object)\n"
+      " (field)\n  (a) []\n  (object)\n"
+      " (field)\n  (b) []\n  (array)\n" },
+    { "{\"a\":\"x\"\"b\":\"y\"}",
+      "(object)\n"
+      " (field)\n  (a) []\n  (string) [x]\n"
+      " (field)\n  (b) []\n  (string) [y]\n" },
+    { "{\"a\":1,\"b\":2 \"c\":3,}",
+      "(object)\n"
+      " (field)\n  (a) []\n  (number) [1]\n"
+      " (field)\n  (b) []\n  (number) [2]\n"
+      " (field)\n  (c) []\n  (number) [3]\n" },
+  };
+  int rc = jp_run_ok_cases (cases, JSN_N (cases));
+
+  /* The colon is still mandatory, and a key still needs a value. */
+  static const char *const bad[] = {
+    "{\"a\" \"b\"}", "{\"a\" 1}", "{\"a\":1 \"b\"}", "{\"a\":1 \"b\":}",
+    "{\"a\":1 [2]}", "{\"a\":1 {}}",
+  };
+  if (jp_run_fail_cases (bad, JSN_N (bad)) != EXIT_SUCCESS)
+    rc = EXIT_FAILURE;
+  return rc;
+}
+
+/* Helpers for tests that parse several values from one reader. */
+
+/* The next parse must return a tree whose node_dump_nv() equals exp. */
+static bool jp_next_ok (xtree_reader_t *reader, const char *exp)
+{
+  bool ok = false;
+  struct xtree_errobj_t err = { 0 };
+  xtree_node_t *node = NULL;
+  char *dump = NULL;
+
+  if (!xtree_errobj_reset (&err, 1024)) {
+    PERROR ("Failed to allocate error object\n");
+    goto cleanup;
+  }
+  node = xtree_json_parse (&err, reader, 2000);
+  if (!node) {
+    PERROR ("Expected a value, parse returned NULL\n");
+    rdr_print_errobj (&err);
+    goto cleanup;
+  }
+  dump = node_dump_nv (&err, node);
+  if (!dump || strcmp (dump, exp) != 0) {
+    PERROR ("Mismatch\n--- expected ---\n%s--- actual ---\n%s",
+            exp, dump ? dump : "(dump failed)\n");
+    goto cleanup;
+  }
+  ok = true;
+
+cleanup:
+  free (dump);
+  xtree_node_free (&node);
+  xtree_errobj_reset (&err, 0);
+  return ok;
+}
+
+/* The next parse must return NULL with NO error: nothing left to parse. */
+static bool jp_next_none (xtree_reader_t *reader)
+{
+  bool ok = false;
+  struct xtree_errobj_t err = { 0 };
+  xtree_node_t *node = NULL;
+
+  if (!xtree_errobj_reset (&err, 1024)) {
+    PERROR ("Failed to allocate error object\n");
+    goto cleanup;
+  }
+  node = xtree_json_parse (&err, reader, 2000);
+  if (node) {
+    PERROR ("Expected no more values, but parse returned a tree\n");
+    goto cleanup;
+  }
+  if (err.libcode || err.syscode) {
+    PERROR ("End of input must not be an error\n");
+    rdr_print_errobj (&err);
+    goto cleanup;
+  }
+  ok = true;
+
+cleanup:
+  xtree_node_free (&node);
+  xtree_errobj_reset (&err, 0);
+  return ok;
+}
+
+/* The next parse must return NULL with a well-formed error set. */
+static bool jp_next_fail (xtree_reader_t *reader)
+{
+  bool ok = false;
+  struct xtree_errobj_t err = { 0 };
+  xtree_node_t *node = NULL;
+
+  if (!xtree_errobj_reset (&err, 1024)) {
+    PERROR ("Failed to allocate error object\n");
+    goto cleanup;
+  }
+  node = xtree_json_parse (&err, reader, 2000);
+  if (node) {
+    PERROR ("Expected the parse to fail, but it returned a tree\n");
+    goto cleanup;
+  }
+  if (!err.libcode && !err.syscode) {
+    PERROR ("Parse returned NULL without setting the error object\n");
+    goto cleanup;
+  }
+  ok = rdr_expect_wellformed_errobj (&err);
+
+cleanup:
+  xtree_node_free (&node);
+  xtree_errobj_reset (&err, 0);
+  return ok;
+}
+
+#define JP_CHECK(x) do { \
+  if (!(x)) { PERROR ("Check failed: %s\n", #x); goto cleanup; } \
+} while (0)
+
+// name: test_json_parse_stream
+int test_json_parse_stream (void)
+{
+  int ret = EXIT_FAILURE;
+  xtree_reader_t *reader = NULL;
+  char *buf = NULL;
+
+  /* 1. Concatenated and line-separated values, then a clean end. */
+  reader = xtree_reader_str (JP_NAME, U ("[1] [2]\n{\"a\":1}"));
+  JP_CHECK (reader);
+  JP_CHECK (jp_next_ok (reader, "(array)\n (number) [1]\n"));
+  JP_CHECK (xtree_reader_peek (reader) == ' ');   /* left right after ']' */
+  JP_CHECK (jp_next_ok (reader, "(array)\n (number) [2]\n"));
+  JP_CHECK (xtree_reader_peek (reader) == '\n');
+  JP_CHECK (jp_next_ok (reader,
+              "(object)\n (field)\n  (a) []\n  (number) [1]\n"));
+  JP_CHECK (jp_next_none (reader));
+  JP_CHECK (jp_next_none (reader));               /* and stays at the end */
+  JP_CHECK (xtree_reader_eof (reader));
+  xtree_reader_free (&reader);
+
+  /* 2. No separator at all: nothing after a closer may be consumed. */
+  reader = xtree_reader_str (JP_NAME, U ("[1][2]{}"));
+  JP_CHECK (reader);
+  JP_CHECK (jp_next_ok (reader, "(array)\n (number) [1]\n"));
+  JP_CHECK (xtree_reader_peek (reader) == '[');
+  JP_CHECK (jp_next_ok (reader, "(array)\n (number) [2]\n"));
+  JP_CHECK (xtree_reader_peek (reader) == '{');
+  JP_CHECK (jp_next_ok (reader, "(object)\n"));
+  JP_CHECK (jp_next_none (reader));
+  xtree_reader_free (&reader);
+
+  /* 3. A stray closer is left for the next parse, which then fails. */
+  reader = xtree_reader_str (JP_NAME, U ("[]]"));
+  JP_CHECK (reader);
+  JP_CHECK (jp_next_ok (reader, "(array)\n"));
+  JP_CHECK (xtree_reader_peek (reader) == ']');
+  JP_CHECK (jp_next_fail (reader));
+  xtree_reader_free (&reader);
+
+  reader = xtree_reader_str (JP_NAME, U ("{}}"));
+  JP_CHECK (reader);
+  JP_CHECK (jp_next_ok (reader, "(object)\n"));
+  JP_CHECK (xtree_reader_peek (reader) == '}');
+  JP_CHECK (jp_next_fail (reader));
+  xtree_reader_free (&reader);
+
+  /* 4. Trailing scalars after a container are the next value. */
+  reader = xtree_reader_str (JP_NAME, U ("{}x"));
+  JP_CHECK (reader);
+  JP_CHECK (jp_next_ok (reader, "(object)\n"));
+  JP_CHECK (xtree_reader_peek (reader) == 'x');
+  JP_CHECK (jp_next_ok (reader, "(symbol) [x]\n"));
+  JP_CHECK (jp_next_none (reader));
+  xtree_reader_free (&reader);
+
+  /* 5. Top-level scalars: the scanner reads one token and the reader is
+   *    left at the first character after it ("12px" is NUMBER 12 then
+   *    SYMBOL px; adjacent strings are two tokens). */
+  reader = xtree_reader_str (JP_NAME, U ("12px"));
+  JP_CHECK (reader);
+  JP_CHECK (jp_next_ok (reader, "(number) [12]\n"));
+  JP_CHECK (xtree_reader_peek (reader) == 'p');
+  JP_CHECK (jp_next_ok (reader, "(symbol) [px]\n"));
+  JP_CHECK (jp_next_none (reader));
+  xtree_reader_free (&reader);
+
+  reader = xtree_reader_str (JP_NAME, U ("\"a\"\"b\" 42 43 true"));
+  JP_CHECK (reader);
+  JP_CHECK (jp_next_ok (reader, "(string) [a]\n"));
+  JP_CHECK (xtree_reader_peek (reader) == '"');
+  JP_CHECK (jp_next_ok (reader, "(string) [b]\n"));
+  JP_CHECK (jp_next_ok (reader, "(number) [42]\n"));
+  JP_CHECK (jp_next_ok (reader, "(number) [43]\n"));
+  JP_CHECK (jp_next_ok (reader, "(bool) [true]\n"));
+  JP_CHECK (jp_next_none (reader));
+  xtree_reader_free (&reader);
+
+  /* 6. Whitespace-only input and trailing whitespace after the last value
+   *    end cleanly, without an error. */
+  reader = xtree_reader_str (JP_NAME, U ("[] \n\t \r\n"));
+  JP_CHECK (reader);
+  JP_CHECK (jp_next_ok (reader, "(array)\n"));
+  JP_CHECK (jp_next_none (reader));
+  xtree_reader_free (&reader);
+
+  /* 7. Many one-per-line values (NDJSON style). */
+  const size_t count = 2000;
+  buf = malloc (count * 24 + 1);
+  JP_CHECK (buf);
+  size_t n = 0;
+  for (size_t i=0; i<count; i++)
+    n += (size_t)sprintf (buf + n, "{\"n\":%zu}\n", i);
+  buf[n] = '\0';
+
+  reader = xtree_reader_str (JP_NAME, (const unsigned char *)buf);
+  JP_CHECK (reader);
+  for (size_t i=0; i<count; i++) {
+    char exp[64];
+    snprintf (exp, sizeof exp,
+              "(object)\n (field)\n  (n) []\n  (number) [%zu]\n", i);
+    if (!jp_next_ok (reader, exp)) {
+      PERROR ("Value %zu of the stream was wrong\n", i);
+      goto cleanup;
+    }
+  }
+  JP_CHECK (jp_next_none (reader));
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  xtree_reader_free (&reader);
+  free (buf);
+  return ret;
+}
+#undef JP_CHECK
+// name: test_json_parse_top_level_scalars
+int test_json_parse_top_level_scalars (void)
+{
+  static const struct jp_ok_case cases[] = {
+    { "42",            "(number) [42]\n" },
+    { "-1.5e+3",       "(number) [-1.5e+3]\n" },
+    { "0x1F",          "(number) [0x1F]\n" },
+    { "1abc",          "(number) [1abc]\n" },
+    { "NaN",           "(number) [NaN]\n" },
+    { "\"x\"",         "(string) [x]\n" },
+    { "\"\"",          "(string) []\n" },
+    { "\"a\nb\"",      "(string) [a\\nb]\n" },
+    { "true",          "(bool) [true]\n" },
+    { "false",         "(bool) [false]\n" },
+    { "undefined",     "(reference) [undefined]\n" },
+    { "A",             "(symbol) [A]\n" },
+    { "$(ONE)",        "(symbol) [$(ONE)]\n" },
+    { "truex",         "(symbol) [truex]\n" },
+    { "null",          NULL },       /* node name not documented */
+    { "Infinity",      NULL },
+    /* surrounding whitespace is skipped */
+    { " \t\r\n42 \n",  "(number) [42]\n" },
+    { "\n\"x\"\n",     "(string) [x]\n" },
+  };
+  return jp_run_ok_cases (cases, JSN_N (cases));
+}
+
+// name: test_json_parse_maxdepth
+int test_json_parse_maxdepth (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = { 0 };
+  xtree_reader_t *reader = NULL;
+  xtree_node_t *node = NULL;
+  char *input = NULL;
+
+  const size_t maxdepth = 8;
+
+  if (!xtree_errobj_reset (&err, 1024)) {
+    PERROR ("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  /* ---------------------------------------------------------------
+   * Test 1: Nesting comfortably below maxdepth must succeed.
+   */
+  const size_t good_depth = 4;
+
+  input = jp_nested (good_depth, true);
+  if (!input) {
+    PERROR ("Failed to allocate input\n");
+    goto cleanup;
+  }
+
+  reader = xtree_reader_str (JP_NAME, (const unsigned char *)input);
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  node = xtree_json_parse (&err, reader, maxdepth);
+  if (!node) {
+    PERROR ("Depth %zu should parse with maxdepth %zu\n",
+            good_depth, maxdepth);
+    rdr_print_errobj (&err);
+    goto cleanup;
+  }
+
+  /* Verify that the resulting tree has the expected depth. */
+  size_t depth = 1;
+  xtree_node_t *cur = node;
+
+  while (xtree_node_child_count (cur) == 1) {
+    cur = xtree_node_child_get (&err, cur, 0);
+    if (!cur) {
+      PERROR ("Failed to retrieve child at depth %zu\n", depth);
+      goto cleanup;
+    }
+    depth++;
+  }
+
+  if (depth != good_depth) {
+    PERROR ("Expected depth %zu, got %zu\n", good_depth, depth);
+    goto cleanup;
+  }
+
+  free (input);
+  input = NULL;
+  xtree_node_free (&node);
+  xtree_reader_free (&reader);
+
+  /* ---------------------------------------------------------------
+   * Test 2: Nesting beyond maxdepth + 2 must fail.
+   */
+  const size_t bad_depth = maxdepth + 3;
+
+  input = jp_nested (bad_depth, true);
+  if (!input) {
+    PERROR ("Failed to allocate input\n");
+    goto cleanup;
+  }
+
+  reader = xtree_reader_str (JP_NAME, (const unsigned char *)input);
+  if (!reader) {
+    PERROR ("Failed to create reader\n");
+    goto cleanup;
+  }
+
+  xtree_errobj_reset (&err, 1024);
+
+  node = xtree_json_parse (&err, reader, maxdepth);
+  if (node) {
+    PERROR ("Depth %zu should exceed maxdepth %zu\n",
+            bad_depth, maxdepth);
+    goto cleanup;
+  }
+
+  if (!err.libcode && !err.syscode) {
+    PERROR ("Depth limit failure did not set the error object\n");
+    goto cleanup;
+  }
+
+  if (!rdr_expect_wellformed_errobj (&err))
+    goto cleanup;
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  free (input);
+  xtree_node_free (&node);
+  xtree_reader_free (&reader);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
+
+
+
+
+
 
 
 int main (int argc, char **argv)
@@ -5678,6 +7431,7 @@ int main (int argc, char **argv)
     TEST (test_child_count_and_get_invalid),
     TEST (test_parent_err_only_on_error),
     TEST (test_node_dump),
+    TEST (test_node_dump_str),
     TEST (test_child_append_reparents),
 
     /* Tests for xtree_reader_t */
@@ -5747,6 +7501,34 @@ int main (int argc, char **argv)
     TEST (test_json_scan_long_number),
     TEST (test_json_scan_many_tokens),
     TEST (test_json_scan_long_symbol_and_comment),
+
+    /* Tests for xtree_scan_token_dump() */
+    TEST (test_scan_token_dump),
+
+    /* Tests for xtree_json_parse() */
+    TEST (test_json_parse_happy),
+
+    TEST (test_json_parse_empty_containers),
+    TEST (test_json_parse_trailing_commas),
+    TEST (test_json_parse_string_edge_cases),
+    TEST (test_json_parse_number_forms),
+    TEST (test_json_parse_literals_and_symbols),
+    TEST (test_json_parse_structure_edge_cases),
+    TEST (test_json_parse_fail_truncated),
+    TEST (test_json_parse_fail_mismatched_and_stray),
+    // TEST (test_json_parse_fail_comma_and_colon_misuse),
+    TEST (test_json_parse_fail_bad_keys),
+    TEST (test_json_parse_number_passthrough),
+    TEST (test_json_parse_fail_unrecognised_tokens),
+    TEST (test_json_parse_null_params),
+    TEST (test_json_parse_every_prefix_fails),
+    TEST (test_json_parse_deep_nesting),
+    TEST (test_json_parse_large_inputs),
+    TEST (test_json_parse_from_file),
+    TEST (test_json_parse_missing_commas),
+    TEST (test_json_parse_top_level_scalars),
+    TEST (test_json_parse_stream),
+    TEST (test_json_parse_maxdepth),
   };
 #undef TEST
 
