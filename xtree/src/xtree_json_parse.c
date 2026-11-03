@@ -3,9 +3,12 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <errno.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "ds_str.h"
+#include "ds_strbuilder.h"
+
 #include "xtree_err.h"
 #include "xtree.h"
 #include "xtree_reader.h"
@@ -549,6 +552,21 @@ cleanup:
   return ret;
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 xtree_node_t *xtree_json_parse (struct xtree_errobj_t *err,
                                 xtree_reader_t *reader,
                                 size_t max_depth)
@@ -561,3 +579,202 @@ xtree_node_t *xtree_json_parse (struct xtree_errobj_t *err,
 
   return toplevel_parse (err, NULL, reader, 0, max_depth);
 }
+
+
+
+static bool json_dump (struct xtree_errobj_t *err, const xtree_node_t *node,
+                       ds_strbuilder_t *sb, size_t indent, size_t level);
+
+static bool dump_indent (struct xtree_errobj_t *err,
+                         ds_strbuilder_t *sb,
+                         size_t indent, size_t level)
+{
+  for (size_t i=0; i < (level * indent); i++) {
+    if (!(ds_strbuilder_append (sb, (const unsigned char *)" ", NULL))) {
+      ERROR (err, xtree_errcode_OOM, "OOM dumping indentation");
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool dump_key (struct xtree_errobj_t *err, const xtree_node_t *node,
+                      ds_strbuilder_t *sb, size_t indent, size_t level)
+{
+  bool ret = true;
+  ret = ret && dump_indent (err, sb, indent, level);
+  ret = ret && ds_strbuilder_append (sb,
+                                     (const unsigned char *)"\"",
+                                     xtree_node_name_get (node),
+                                     (const unsigned char *)"\"",
+                                     NULL);
+  if (!ret) {
+    ERROR (err, xtree_errcode_OOM, "OOM dumping key");
+  }
+  return ret;
+}
+
+static bool dump_object (struct xtree_errobj_t *err, const xtree_node_t *node,
+                         ds_strbuilder_t *sb, size_t indent, size_t level)
+{
+  bool ret = true;
+  const unsigned char *delim = (const unsigned char *)"";
+  size_t nchildren = xtree_node_child_count (node);
+
+  // ret = ret && dump_indent (err, sb, indent, level);
+  ret = ret && ds_strbuilder_append (sb, (const unsigned char *)"{\n", NULL);
+
+  for (size_t i=0; ret && i < nchildren; i++) {
+    const xtree_node_t *node_field = xtree_node_child_get (err, node, i);
+    if (!node_field) {
+      ERROR (err, xtree_errcode_CHILD_NOT_FOUND, "Failed to find child %zu", i);
+      return false;
+    }
+    const xtree_node_t *node_name = xtree_node_child_get (err, node_field, 0);
+    const xtree_node_t *node_value = xtree_node_child_get (err, node_field, 1);
+    ret = ret && ds_strbuilder_append (sb, delim, NULL);
+    if (!(ret = ret && dump_key (err, node_name, sb, indent, level)) ||
+        !(ret = ret && ds_strbuilder_append (sb, (const unsigned char *)": ", NULL)) ||
+        !(ret = ret && json_dump (err, node_value, sb, indent, level))) {
+      return false;
+    }
+    delim = (const unsigned char *)",\n";
+  }
+  ret = ret && ds_strbuilder_append (sb, (const unsigned char *)"\n", NULL);
+  ret = ret && dump_indent (err, sb, indent, level ? level - 1 : level);
+  ret = ret && ds_strbuilder_append (sb, (const unsigned char *)"}", NULL);
+  return ret;
+}
+
+static bool dump_array (struct xtree_errobj_t *err, const xtree_node_t *node,
+                        ds_strbuilder_t *sb, size_t indent, size_t level)
+{
+  bool ret = true;
+  const unsigned char *delim = (const unsigned char *)"\n";
+  const xtree_node_t *child = NULL;
+  size_t nchildren = xtree_node_child_count (node);
+
+  ret = ret && ds_strbuilder_append (sb, (const unsigned char *)"[ ", NULL);
+
+  for (size_t i=0; ret && i < nchildren; i++) {
+    if (!(child = xtree_node_child_get (err, node, i))) {
+      return false;
+    }
+    ret = ret && ds_strbuilder_append (sb, delim, NULL);
+    ret = ret && dump_indent (err, sb, indent, level);
+    ret = ret && json_dump (err, child, sb, indent, level);
+    delim = (const unsigned char *)",\n";
+  }
+
+  ret = ret && ds_strbuilder_append (sb, (const unsigned char *)"\n", NULL);
+  ret = ret && dump_indent (err, sb, indent, level ? level - 1 : level);
+  ret = ret && ds_strbuilder_append (sb, (const unsigned char *)"]", NULL);
+
+  return ret;
+}
+
+static bool dump_atom (struct xtree_errobj_t *err, const xtree_node_t *node,
+                       ds_strbuilder_t *sb, size_t indent, size_t level)
+{
+  bool ret = true;
+  (void)indent;
+  (void)level;
+  ret = ret && ds_strbuilder_append (sb, (const unsigned char *)" ", NULL);
+  ret = ret && ds_strbuilder_append (sb,
+                                     xtree_node_value_get (err, node),
+                                     NULL);
+  return ret;
+}
+
+static bool dump_string (struct xtree_errobj_t *err, const xtree_node_t *node,
+                         ds_strbuilder_t *sb, size_t indent, size_t level)
+{
+  bool ret = true;
+  (void)indent;
+  (void)level;
+  ret = ret && ds_strbuilder_append (sb, (const unsigned char *)" ", NULL);
+  ret = ret && ds_strbuilder_append (sb,
+                                     (const unsigned char *)"\"",
+                                     xtree_node_value_get (err, node),
+                                     (const unsigned char *)"\"",
+                                     NULL);
+  return ret;
+}
+
+static bool json_dump (struct xtree_errobj_t *err, const xtree_node_t *node,
+                       ds_strbuilder_t *sb, size_t indent, size_t level)
+{
+  /* Json-types are stored in the name field. We decide how to handle this using
+   * that field:
+   *   "array":        LIST
+   *   "bool":         ATOM
+   *   "number":       ATOM
+   *   "object":       LIST
+   *   "reference":    ATOM
+   *   "string":       ATOM
+   *   "symbol":       ATOM
+   */
+#define SH0(x)        (uint32_t)((x << 0))
+#define SH8(x)        (uint32_t)((x << 8))
+#define SH16(x)       (uint32_t)((x << 16))
+#define HASH(a,b,c)       (uint32_t)((SH0(a) | SH8(b) | SH16(c)))
+
+#define HARRAY      HASH('a', 'r', 'r')
+#define HBOOL       HASH('b', 'o', 'o')
+#define HNUMBER     HASH('n', 'u', 'm')
+#define HOBJECT     HASH('o', 'b', 'j')
+#define HREFERENCE  HASH('r', 'e', 'f')
+#define HSTRING     HASH('s', 't', 'r')
+#define HSYMBOL     HASH('s', 'y', 'm')
+
+  const unsigned char *name = xtree_node_name_get (node);
+  if (!name || (strlen ((const char *)name) < 3)) {
+    ERROR (err, xtree_errcode_UNKNOWN,
+           "Failed to retrieve name field from node %p", node);
+    return false;
+  }
+  uint32_t hash = HASH(name[0], name[1], name[2]);
+  bool ret = false;
+  switch (hash) {
+    case HARRAY:        ret = dump_array  (err, node, sb, indent, level + 1);  break;
+    case HBOOL:         ret = dump_atom   (err, node, sb, indent, level + 1);  break;
+    case HNUMBER:       ret = dump_atom   (err, node, sb, indent, level + 1);  break;
+    case HOBJECT:       ret = dump_object (err, node, sb, indent, level + 1);  break;
+    case HREFERENCE:    ret = dump_atom   (err, node, sb, indent, level + 1);  break;
+    case HSTRING:       ret = dump_string (err, node, sb, indent, level + 1);  break;
+    case HSYMBOL:       ret = dump_atom   (err, node, sb, indent, level + 1);  break;
+    default:
+      ERROR (err, xtree_errcode_UNKNOWN, "Hit default for node [%s]\n", name);
+      break;
+  }
+
+#undef SH0
+#undef SH8
+#undef SH16
+#undef HASH
+#undef HARRAY
+#undef HBOOL
+#undef HNUMBER
+#undef HOBJECT
+#undef HREFERENCE
+#undef HSTRING
+#undef HSYMBOL
+
+  return ret;
+}
+
+char *xtree_json_parse_dump (struct xtree_errobj_t *err,
+                             const xtree_node_t *json_node,
+                             size_t indent)
+{
+  ds_strbuilder_t *sb = ds_strbuilder_new (NULL);
+  if (!(json_dump (err, json_node, sb, indent, 0))) {
+    ds_strbuilder_del (sb);
+    return NULL;
+  }
+  char *ret = ds_strbuilder_build (sb);
+  ds_strbuilder_del (sb);
+  return ret;
+}
+
+

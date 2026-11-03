@@ -6900,11 +6900,6 @@ cleanup:
   return ret;
 }
 
-/* ------------------------------------------------------------------
- * Not in the default list. main() only knows tests that are in tests[],
- * so to use these, add a TEST() line for them temporarily.
- * ------------------------------------------------------------------ */
-
 // name: test_json_parse_probe
 int test_json_parse_probe (void)
 {
@@ -7372,6 +7367,167 @@ cleanup:
   return ret;
 }
 
+/* ------------------------------------------------------------------
+ * Roundtrip test for xtree_json_parse_dump()
+ *
+ * Verifies that the dump function produces output that:
+ *   1. Matches a known-good expected string, and
+ *   2. Is idempotent — parsing the dump and dumping again yields the
+ *      exact same string.
+ *
+ * The source JSON exercises every value type the parser supports:
+ * bool (true/false), string, number (decimal int, float, hex), NaN,
+ * undefined (reference), symbol, null, Infinity, nested array and a
+ * nested object.
+ *
+ * The expected string assumes compact output at indent=0 (no spaces
+ * after ':' or ','). If the actual dump format differs, the failure
+ * message prints the real output so this literal can be corrected —
+ * the roundtrip (output2 == output1) check is independent of the exact
+ * format and will still catch any non-determinism or re-parse failure.
+ * ------------------------------------------------------------------ */
+
+// name: test_json_parse_dump_roundtrip
+int test_json_parse_dump_roundtrip (void)
+{
+  int ret = EXIT_FAILURE;
+  struct xtree_errobj_t err = { 0 };
+  xtree_reader_t *reader1 = NULL;
+  xtree_reader_t *reader2 = NULL;
+  xtree_node_t *node1 = NULL;
+  xtree_node_t *node2 = NULL;
+  char *output1 = NULL;
+  char *output2 = NULL;
+
+  /* Source JSON: one of every supported value type. The formatting
+   * (whitespace, alignment) is deliberately not compact so that the
+   * dump must canonicalise it. */
+  static const unsigned char *source = (const unsigned char *)
+    "{\n"
+    "  \"bool_true\":    true,\n"
+    "  \"bool_false\":   false,\n"
+    "  \"string_val\":   \"hello world\",\n"
+    "  \"number_int\":   42,\n"
+    "  \"number_float\": -3.14e+5,\n"
+    "  \"number_hex\":   0x1F,\n"
+    "  \"nan_val\":      NaN,\n"
+    "  \"undefined_val\": undefined,\n"
+    "  \"symbol_val\":   mySymbol,\n"
+    "  \"null_val\":     null,\n"
+    "  \"infinity_val\": Infinity,\n"
+    "  \"nested_array\": [1, \"two\", true, null, NaN],\n"
+    "  \"nested_object\": {\n"
+    "    \"inner_str\":   \"inner\",\n"
+    "    \"inner_num\":   7,\n"
+    "    \"inner_bool\":  false\n"
+    "  }\n"
+    "}";
+
+  /* Expected dump at indent=0. Built by hand from the source above;
+   * if the library's compact format differs (e.g. it adds a space
+   * after ':'), copy the actual output from the failure message. */
+  static const char *expected =
+"{\n"
+"   \"bool_true\":  true,\n"
+"   \"bool_false\":  false,\n"
+"   \"string_val\":  \"hello world\",\n"
+"   \"number_int\":  42,\n"
+"   \"number_float\":  -3.14e+5,\n"
+"   \"number_hex\":  0x1F,\n"
+"   \"nan_val\":  NaN,\n"
+"   \"undefined_val\":  undefined,\n"
+"   \"symbol_val\":  mySymbol,\n"
+"   \"null_val\":  null,\n"
+"   \"infinity_val\":  Infinity,\n"
+"   \"nested_array\": [ \n"
+"       1,\n"
+"       \"two\",\n"
+"       true,\n"
+"       null,\n"
+"       NaN\n"
+"   ],\n"
+"   \"nested_object\": {\n"
+"      \"inner_str\":  \"inner\",\n"
+"      \"inner_num\":  7,\n"
+"      \"inner_bool\":  false\n"
+"   }\n"
+"}";
+
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR ("Failed to allocate error object\n");
+    goto cleanup;
+  }
+
+  /* 1. Parse the source JSON into node1. */
+  reader1 = xtree_reader_str ("dump-source", source);
+  if (!reader1) {
+    PERROR ("Failed to create reader for source JSON\n");
+    goto cleanup;
+  }
+  node1 = xtree_json_parse (&err, reader1, 2000);
+  if (!node1) {
+    PERROR ("Failed to parse source JSON\n");
+    goto cleanup;
+  }
+
+  /* 2. Dump node1 to output1. */
+  output1 = xtree_json_parse_dump (&err, node1, 3);
+  if (!output1) {
+    PERROR ("Failed to dump node1\n");
+    goto cleanup;
+  }
+
+  /* 3. Parse output1 back into a new node2. */
+  reader2 = xtree_reader_str ("dump-round2", (const unsigned char *)output1);
+  if (!reader2) {
+    PERROR ("Failed to create reader for round 2\n");
+    goto cleanup;
+  }
+  node2 = xtree_json_parse (&err, reader2, 2000);
+  if (!node2) {
+    PERROR ("Failed to re-parse the dumped output\n");
+    goto cleanup;
+  }
+
+  /* 4. Dump node2 to output2. */
+  output2 = xtree_json_parse_dump (&err, node2, 3);
+  if (!output2) {
+    PERROR ("Failed to dump node2\n");
+    goto cleanup;
+  }
+
+  /* 5. output1 must match the expected string. */
+  if (strcmp (output1, expected) != 0) {
+    PERROR ("output1 does not match expected dump\n"
+            "--- expected ---\n[%s]\n"
+            "--- output1 ---\n[%s]\n",
+            expected, output1);
+    goto cleanup;
+  }
+
+  /* 6. output2 must also match the expected string (idempotency). */
+  if (strcmp (output2, expected) != 0) {
+    PERROR ("output2 does not match expected dump\n"
+            "--- expected ---\n[%s]\n"
+            "--- output2 ---\n[%s]\n",
+            expected, output2);
+    goto cleanup;
+  }
+
+  ret = EXIT_SUCCESS;
+
+cleanup:
+  free (output2);
+  free (output1);
+  xtree_node_free (&node2);
+  xtree_reader_free (&reader2);
+  xtree_node_free (&node1);
+  xtree_reader_free (&reader1);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  return ret;
+}
+
 
 
 
@@ -7529,6 +7685,7 @@ int main (int argc, char **argv)
     TEST (test_json_parse_top_level_scalars),
     TEST (test_json_parse_stream),
     TEST (test_json_parse_maxdepth),
+    TEST (test_json_parse_dump_roundtrip),
   };
 #undef TEST
 
