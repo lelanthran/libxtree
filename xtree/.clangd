@@ -15,4 +15,5 @@ CompileFlags:
     - -std=c17
     - -x
     - c
+    - -Werror=unused-function
 
