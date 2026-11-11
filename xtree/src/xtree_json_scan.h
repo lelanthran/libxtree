@@ -31,7 +31,7 @@
   // EOF and ERROR tokens have an empty string as their text.
 
   enum xtree_json_token_id_t {
-    xtree_json_token_RESERVED   = -2, // Reserved for internal use
+    xtree_json_token_SENTINEL   = -2, // Reserved for internal use
     xtree_json_token_ERROR      = -1, // Error in scanner
     xtree_json_token_EOF        = 0,  // End of input
     xtree_json_token_LBRACE,          // {

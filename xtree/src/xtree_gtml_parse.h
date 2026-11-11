@@ -3,7 +3,7 @@
 #define H_XTREE_GTML_PARSE
 
 /*
- * xtree_gtml_parse(): parse one TML-like value from a reader into an xtree.
+ * xtree_gtml_parse(): parse one GTML-like value from a reader into an xtree.
  *
  * TODO: Specify the language grammer here.
  */
@@ -16,7 +16,7 @@ extern "C" {
                                   xtree_reader_t *reader,
                                   size_t max_depth);
 
-  // Convert a TML that was parsed into an xtree_node_t back into a TML
+  // Convert a GTML that was parsed into an xtree_node_t back into a GTML
   // string. The caller is responsible for freeing the returned value.
   char *xtree_gtml_parse_dump (struct xtree_errobj_t *err,
                                const xtree_node_t *tml_node,

@@ -83,8 +83,11 @@ static bool fdump (char **dst_fname, FILE **dst_outf)
 /* Report every field of an error object returned by the reader. */
 static void rdr_print_errobj (const struct xtree_errobj_t *err)
 {
-  PERROR ("errobj: libcode=%i libmsg=[%.*s] syscode=%i sysmsg=[%.*s] "
-          "src=[%.*s:%i] message=[%s] message_len=%zu\n",
+  PERROR ("errobj:\n"
+          "libcode=%i libmsg=[%.*s]\n"
+          "syscode=%i sysmsg=[%.*s]\n"
+          "src=[%.*s:%i]\n"
+          "message=[%s] message_len=%zu\n",
           (int)err->libcode, (int)sizeof err->libmsg, err->libmsg,
           err->syscode, (int)sizeof err->sysmsg, err->sysmsg,
           (int)sizeof err->srcfile, err->srcfile, err->srcline,
@@ -320,7 +323,7 @@ struct jsn_exp {
 static const char *jsn_idname (enum xtree_json_token_id_t id)
 {
   switch (id) {
-    case xtree_json_token_RESERVED:       return "RESERVED";
+    case xtree_json_token_SENTINEL:       return "SENTINEL";
     case xtree_json_token_ERROR:          return "ERROR";
     case xtree_json_token_EOF:            return "EOF";
     case xtree_json_token_LBRACE:         return "LBRACE";

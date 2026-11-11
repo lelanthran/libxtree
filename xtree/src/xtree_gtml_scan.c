@@ -7,6 +7,7 @@
 
 #include "ds_strbuilder.h"
 
+#include "xtree_err.h"
 #include "xtree_reader.h"
 #include "xtree_scan.h"
 #include "xtree_gtml_scan.h"

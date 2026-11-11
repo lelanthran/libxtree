@@ -7,6 +7,7 @@
 
 #include "ds_strbuilder.h"
 
+#include "xtree_err.h"
 #include "xtree_reader.h"
 #include "xtree_scan.h"
 #include "xtree_json_scan.h"
@@ -466,7 +467,7 @@ const char *xtree_json_token_id_str (enum xtree_json_token_id_t id)
     const char *str;
   } ids[] = {
 #define X(id) { id, #id }
-    X (xtree_json_token_RESERVED),
+    X (xtree_json_token_SENTINEL),
     X (xtree_json_token_ERROR),
     X (xtree_json_token_EOF),
     X (xtree_json_token_LBRACE),

@@ -27,73 +27,6 @@ unsigned char *tokstr = NULL;
 
 
 
-static void token_errv (struct xtree_errobj_t *err,
-                        xtree_scan_token_t *token,
-                        enum xtree_errcode_t errcode,
-                        const char *fmts,
-                        va_list ap)
-{
-  char *tmp1 = NULL,
-       *tmp2 = NULL,
-       *msg = NULL;
-
-  ds_str_printf (&tmp1, "[%s:%i] [%s] : ",
-                 xtree_scan_token_filename (token),
-                 xtree_scan_token_line (token),
-                 xtree_scan_token_text (token));
-  ds_str_vprintf (&tmp2, fmts, ap);
-
-  if (!tmp1 || !tmp2 || !(msg = ds_str_cat (tmp1, tmp2, NULL))) {
-    ERROR (err, xtree_errcode_OOM, "OOM");
-  } else {
-    ERROR (err, errcode, "%s", msg);
-  }
-  free (tmp1);
-  free (tmp2);
-  free (msg);
-}
-
-static void token_err (struct xtree_errobj_t *err,
-                       xtree_scan_token_t *token,
-                       enum xtree_errcode_t errcode,
-                       const char *fmts,
-                       ...)
-{
-  va_list ap;
-  va_start (ap, fmts);
-  token_errv (err, token, errcode, fmts, ap);
-  va_end (ap);
-}
-
-static bool token_id_assertv (struct xtree_errobj_t *err,
-                              xtree_scan_token_t *token,
-                              enum xtree_json_token_id_t id, va_list ap)
-{
-  enum xtree_json_token_id_t tokenid = xtree_scan_token_id (token);
-  while (id != xtree_json_token_RESERVED) {
-    if (id == tokenid)
-      return true;
-    id = va_arg (ap, enum xtree_json_token_id_t);
-  }
-  token_err (err, token, xtree_errcode_UNEXPECTED_TOKEN, "Unexpected token");
-  return false;
-}
-
-static bool token_id_assert (struct xtree_errobj_t *err,
-                             xtree_scan_token_t *token,
-                             enum xtree_json_token_id_t id, ...)
-{
-  va_list ap;
-  va_start (ap, id);
-  bool ret = token_id_assertv (err, token, id, ap);
-  va_end (ap);
-  return ret;
-}
-
-
-
-
-
 
 static xtree_node_t *parse_object (struct xtree_errobj_t *err,
                                    xtree_node_t *parent,
@@ -264,7 +197,7 @@ static xtree_node_t *parse_field (struct xtree_errobj_t *err,
   // The first token we encounter might by a comma (from a previous field) or a
   // closing brace (ending the field list).
   if (!(token_name = xtree_json_scan (reader))) {
-    token_err (err, token_name, xtree_errcode_EOF,
+    xtree_scan_token_err (err, token_name, xtree_errcode_EOF,
                "Expected a token, got NULL");
     goto cleanup;
   }
@@ -275,7 +208,7 @@ static xtree_node_t *parse_field (struct xtree_errobj_t *err,
   if (*fieldnum && token_name_id == xtree_json_token_COMMA) {
     xtree_scan_token_free (&token_name);
     if (!(token_name = xtree_json_scan (reader))) {
-      token_err (err, token_name, xtree_errcode_EOF,
+      xtree_scan_token_err (err, token_name, xtree_errcode_EOF,
                  "Expected a token, got NULL");
       goto cleanup;
     }
@@ -290,35 +223,35 @@ static xtree_node_t *parse_field (struct xtree_errobj_t *err,
   // The next 2x tokens are mandatory, even though the colon is discarded.
   if (!(token_colon = xtree_json_scan (reader)) ||
       !(token_value = xtree_json_scan (reader))) {
-    token_err (err, token_colon ? token_colon : token_value,
+    xtree_scan_token_err (err, token_colon ? token_colon : token_value,
                     xtree_errcode_EOF, "Expected a token, got NULL");
     goto cleanup;
   }
 
   // Check that all the tokens are of the correct type; our implementation
   // allows a very relaxed JSON fieldname; it can be a string OR a symbol.
-  if (!(token_id_assert (err, token_name,
-                         xtree_json_token_STRING,
-                         xtree_json_token_SYMBOL,
-                         xtree_json_token_RESERVED)) ||
-      !(token_id_assert (err, token_colon,
-                         xtree_json_token_COLON,
-                         xtree_json_token_RESERVED)) ||
-      !(token_id_assert (err, token_value,
-                         xtree_json_token_STRING,
-                         xtree_json_token_SYMBOL,
-                         xtree_json_token_NUMBER,
-                         xtree_json_token_NAN,
-                         xtree_json_token_INFINITY,
-                         xtree_json_token_NEG_NAN,
-                         xtree_json_token_NEG_INFINITY,
-                         xtree_json_token_TRUE,
-                         xtree_json_token_FALSE,
-                         xtree_json_token_NULL,
-                         xtree_json_token_UNDEFINED,
-                         xtree_json_token_LBRACKET,
-                         xtree_json_token_LBRACE,
-                         xtree_json_token_RESERVED))) {
+  if (!(xtree_scan_token_id_assert (err, token_name,
+                                    xtree_json_token_STRING,
+                                    xtree_json_token_SYMBOL,
+                                    xtree_json_token_SENTINEL)) ||
+      !(xtree_scan_token_id_assert (err, token_colon,
+                                    xtree_json_token_COLON,
+                                    xtree_json_token_SENTINEL)) ||
+      !(xtree_scan_token_id_assert (err, token_value,
+                                    xtree_json_token_STRING,
+                                    xtree_json_token_SYMBOL,
+                                    xtree_json_token_NUMBER,
+                                    xtree_json_token_NAN,
+                                    xtree_json_token_INFINITY,
+                                    xtree_json_token_NEG_NAN,
+                                    xtree_json_token_NEG_INFINITY,
+                                    xtree_json_token_TRUE,
+                                    xtree_json_token_FALSE,
+                                    xtree_json_token_NULL,
+                                    xtree_json_token_UNDEFINED,
+                                    xtree_json_token_LBRACKET,
+                                    xtree_json_token_LBRACE,
+                                    xtree_json_token_SENTINEL))) {
     goto cleanup;
   }
 
@@ -391,7 +324,7 @@ static xtree_node_t *parse_array (struct xtree_errobj_t *err,
   bool error = true;
   xtree_node_t *ret = NULL;
   xtree_scan_token_t *token = NULL;
-  enum xtree_json_token_id_t tokenid = xtree_json_token_RESERVED;
+  enum xtree_json_token_id_t tokenid = xtree_json_token_SENTINEL;
 
   if (!(ret = xtree_node_new (err, parent, (unsigned char *)"array", xtree_node_type_LIST))) {
     goto cleanup;
@@ -404,21 +337,21 @@ static xtree_node_t *parse_array (struct xtree_errobj_t *err,
       xtree_scan_token_free (&token);
       continue;
     }
-    if (!(token_id_assert (err, token,
-                           xtree_json_token_STRING,
-                           xtree_json_token_SYMBOL,
-                           xtree_json_token_NUMBER,
-                           xtree_json_token_NAN,
-                           xtree_json_token_INFINITY,
-                           xtree_json_token_NEG_NAN,
-                           xtree_json_token_NEG_INFINITY,
-                           xtree_json_token_TRUE,
-                           xtree_json_token_FALSE,
-                           xtree_json_token_NULL,
-                           xtree_json_token_UNDEFINED,
-                           xtree_json_token_LBRACKET,
-                           xtree_json_token_LBRACE,
-                           xtree_json_token_RESERVED))) {
+    if (!(xtree_scan_token_id_assert (err, token,
+                                      xtree_json_token_STRING,
+                                      xtree_json_token_SYMBOL,
+                                      xtree_json_token_NUMBER,
+                                      xtree_json_token_NAN,
+                                      xtree_json_token_INFINITY,
+                                      xtree_json_token_NEG_NAN,
+                                      xtree_json_token_NEG_INFINITY,
+                                      xtree_json_token_TRUE,
+                                      xtree_json_token_FALSE,
+                                      xtree_json_token_NULL,
+                                      xtree_json_token_UNDEFINED,
+                                      xtree_json_token_LBRACKET,
+                                      xtree_json_token_LBRACE,
+                                      xtree_json_token_SENTINEL))) {
         goto cleanup;
     }
     if (!(parse (err, ret, reader, token, depth, max_depth)))
@@ -427,8 +360,8 @@ static xtree_node_t *parse_array (struct xtree_errobj_t *err,
   }
 
   if (!token || (tokenid == xtree_json_token_EOF)) {
-    token_err (err, token, xtree_errcode_EOF,
-               "Unexpected EOF while reading array");
+    xtree_scan_token_err (err, token, xtree_errcode_EOF,
+                          "Unexpected EOF while reading array");
     goto cleanup;
   }
 
@@ -458,7 +391,7 @@ static xtree_node_t *toplevel_parse (struct xtree_errobj_t *err,
   }
 
 #define E(c,msg)    do { \
-  token_err (err, token, c, "%s:%zu: " msg); \
+  xtree_scan_token_err (err, token, c, "%s:%zu: " msg); \
 } while (0)
 
   switch (xtree_scan_token_id (token)) {

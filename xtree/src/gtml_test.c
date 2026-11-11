@@ -35,7 +35,7 @@
   fprintf (stderr, __VA_ARGS__); \
 } while (0)
 
-#if 0
+
 static void dumperr (struct xtree_errobj_t *err)
 {
   if (err->libcode || err->syscode) {
@@ -43,11 +43,11 @@ static void dumperr (struct xtree_errobj_t *err)
   }
 }
 
+#if 0
 static int ustrcmp (const unsigned char *a, const unsigned char *b)
 {
   return strcmp ((const char *)a, (const char *)b);
 }
-
 #endif
 
 
@@ -63,7 +63,7 @@ static unsigned char *makestr (const unsigned char **sa)
   ds_strbuilder_t *sb = ds_strbuilder_new ((unsigned char *)"");
 
   for (size_t i=0; sa[i]; i++) {
-    if (!(ds_strbuilder_append (sb, sa[i], NULL)))
+    if (!(ds_strbuilder_append (sb, sa[i], "\n", NULL)))
       goto cleanup;
   }
 
@@ -115,16 +115,47 @@ static int test_gtml_basic (void)
    (const unsigned char *)"</Root>",
   NULL
   };
-  unsigned char *input = makestr (input_array);
+  xtree_reader_t *reader = NULL;
+  xtree_node_t *root_node = NULL;
+  xtree_node_t *tmp = NULL;
+  unsigned char *input = NULL;
+  struct xtree_errobj_t err = {};
 
-  if (!input) {
+  if (!(input = makestr (input_array))) {
     PERROR ("OOM creating input\n");
     goto cleanup;
   }
 
+  if (!(xtree_errobj_reset (&err, 1024))) {
+    PERROR ("Failed to init the error object\n");
+    goto cleanup;
+  }
+
+  if (!(reader = xtree_reader_str ("inline source", input))) {
+    PERROR ("Failed to create a reader for the string\n");
+    goto cleanup;
+  }
+
+  if (!(root_node = xtree_node_new (&err, NULL, U("root-node"), xtree_node_type_LIST))) {
+    PERROR ("OOM creating root node\n");
+    goto cleanup;
+  }
+
+  size_t nchild = 0;
+  while ((tmp = xtree_gtml_parse (&err, reader, 1024)) != NULL) {
+    if (!(xtree_node_child_append (&err, root_node, tmp))) {
+      xtree_node_free (&tmp);
+      PERROR ("Failed to attach child %zu to root_node\n", nchild);
+    }
+    nchild++;
+  }
   ret = EXIT_SUCCESS;
 
 cleanup:
+  xtree_reader_free (&reader);
+  dumperr (&err);
+  xtree_errobj_reset (&err, 0);
+  xtree_node_free (&root_node);
   free (input);
   return ret;
 }
