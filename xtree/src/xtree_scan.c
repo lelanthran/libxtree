@@ -71,12 +71,12 @@ void xtree_scan_token_id_set (xtree_scan_token_t *token, int id)
 
 const unsigned char *xtree_scan_token_text (const xtree_scan_token_t *token)
 {
-  return token ? token->text : NULL;
+  return token ? token->text : (const unsigned char *)"";
 }
 
 const char *xtree_scan_token_filename (const xtree_scan_token_t *token)
 {
-  return token ? token->filename : NULL;
+  return token ? token->filename : "";
 }
 
 size_t xtree_scan_token_line (const xtree_scan_token_t *token)

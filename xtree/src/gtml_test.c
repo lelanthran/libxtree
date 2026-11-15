@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <stdint.h>
 
 
 #include <unistd.h>
@@ -36,11 +38,13 @@
 } while (0)
 
 
-static void dumperr (struct xtree_errobj_t *err)
+static int dumperr (struct xtree_errobj_t *err)
 {
   if (err->libcode || err->syscode) {
     xtree_errobj_dump (err, stdout);
+    return EXIT_FAILURE;
   }
+  return EXIT_SUCCESS;
 }
 
 #if 0
@@ -56,6 +60,7 @@ static int ustrcmp (const unsigned char *a, const unsigned char *b)
  * ------------------------------------------------------------------ */
 
 
+#if 0
 static unsigned char *makestr (const unsigned char **sa)
 {
   bool error = true;
@@ -78,85 +83,292 @@ cleanup:
   }
   return ret;
 }
+#endif
 
-static int test_gtml_basic (void)
+static int test_gtml_scan_happy (void)
 {
   int ret = EXIT_FAILURE;
 
-  static const unsigned char *input_array[] = {
-   (const unsigned char *)"<!doctype gtml>",
-   (const unsigned char *)"<Root Node=\"Document\" empty1 empty2= empty3=\"\">",
-   (const unsigned char *)"<# This comment lives at document level.",
-   (const unsigned char *)"   The body may contain <tags>, &entities;, and ]].",
-   (const unsigned char *)"   Comments do not nest and end only at the terminator. #>",
-   (const unsigned char *)"<![CDATA[  CDATA at document level.",
-   (const unsigned char *)"  Tags like <this> are NOT scanned here, nor are &amp; entities.",
-   (const unsigned char *)"  Whitespace   is   preserved   verbatim.",
-   (const unsigned char *)"  Case Is Preserved, Too.",
-   (const unsigned char *)"]]>",
-   (const unsigned char *)"<?directive target=\"doc-level\" ?>",
-   (const unsigned char *)"<SelfClosing id=\"one\" id=\"two\" bare extra=\"\" noQuote=NakedName num=42 neg=-7 dec=3.14 hex=0xFF/>",
-   (const unsigned char *)"<parent>",
-   (const unsigned char *)"  <child a=x b=1 c=007 d=-42 e=3.14 f=0xFF g='Two Words' h=\"Mixed Case Kept\" i=>",
-   (const unsigned char *)"    Text with entities: &lt; &gt; &amp; &#65; &#x41; &#0065;",
-   (const unsigned char *)"    And a bogus ampersand: &nope; and a lone one: & here.",
-   (const unsigned char *)"  </child>",
-   (const unsigned char *)"  <child/>",
-   (const unsigned char *)"</parent>",
-   (const unsigned char *)"<MixedCaseTag ATTR=LowerCaseUnquoted COUNT=99>",
-   (const unsigned char *)"  <inner>Some Text</inner>",
-   (const unsigned char *)"  <?inline-directive not scanned for <tags> or &entities; ?>",
-   (const unsigned char *)"  <![CDATA[ literal content ]]>",
-   (const unsigned char *)"</MixedCaseTag>",
-   (const unsigned char *)"<UPPER></UPPER>",
-   (const unsigned char *)"<lower></LOWER>",
-   (const unsigned char *)"<top2>Second top-level element makes this a forest.</top2>",
-   (const unsigned char *)"<directiveOnly><?a?><?b c?></directiveOnly>",
-   (const unsigned char *)"</Root>",
-  NULL
-  };
-  xtree_reader_t *reader = NULL;
-  xtree_node_t *root_node = NULL;
-  xtree_node_t *tmp = NULL;
-  unsigned char *input = NULL;
-  struct xtree_errobj_t err = {};
 
-  if (!(input = makestr (input_array))) {
-    PERROR ("OOM creating input\n");
-    goto cleanup;
-  }
+  static const struct {
+    const char *name;
+    xtree_scan_token_t *(*fptr) (struct xtree_errobj_t *, xtree_reader_t *);
+    enum xtree_gtml_token_id_t id;
+    const char *input;
+    const char *output;
+    const char *remaining;
+  } tests[] = {
+    {
+      "whitespace",   xtree_gtml_scan_wspace,     xtree_gtml_token_WSPACE,
+      " \n \r\n\t \f <....",
+      " \n \r\n\t \f ",
+      "<...",
+    },
+    {
+      "equal1",        xtree_gtml_scan_equal,      xtree_gtml_token_EQUAL,
+      "=ddd",
+      "=",
+      "ddd",
+    },
+    {
+      "cdata",        xtree_gtml_scan_cdata,      xtree_gtml_token_CDATA,
+      "<![CDATA[ <something goes here> ]]>s",
+      " <something goes here> ",
+      "s",
+    },
+    {
+      "tagname1",      xtree_gtml_scan_tagname,    xtree_gtml_token_TAGNAME,
+      "<test-tagname name1=value1 />",
+      "test-tagname",
+      " name1=value1",
+    },
+    {
+      "tagname2",      xtree_gtml_scan_tagname,    xtree_gtml_token_TAGNAME,
+      "<test-tagname>",
+      "test-tagname",
+      ">",
+    },
+    {
+      "tagname3",   xtree_gtml_scan_tagname, xtree_gtml_token_TAGNAME,
+      "<br/>",
+      "br",
+      "/>",
+    },
+    {
+      "tagname4",   xtree_gtml_scan_tagname, xtree_gtml_token_TAGNAME,
+      "<a\nx>",
+      "a",
+      "\nx>",
+    },
+    {
+      "close-tag1",     xtree_gtml_scan_close_tag,  xtree_gtml_token_CLOSE_TAG,
+      "</tagname> ",
+      "tagname",
+      ">",
+    },
+    {
+      "close-tag2",     xtree_gtml_scan_close_tag,  xtree_gtml_token_CLOSE_TAG,
+      "</tagname   >s",
+      "tagname",
+      ">",
+    },
+    {
+      "attr-name",    xtree_gtml_scan_attr_name,  xtree_gtml_token_ATTR_NAME,
+      " name1=value1 />",
+      "name1",
+      "=",
+    },
+    {
+      "attr-name2",   xtree_gtml_scan_attr_name, xtree_gtml_token_ATTR_NAME,
+      " x y>",
+      "x",
+      " y>",
+    },
+    {
+      "attr-name3",   xtree_gtml_scan_attr_name, xtree_gtml_token_ATTR_NAME,
+      " x>",
+      "x",
+      ">",
+    },
+    {
+      "attr-name4",   xtree_gtml_scan_attr_name, xtree_gtml_token_ATTR_NAME,
+      " x/>",
+      "x",
+      "/>",
+    },
+    {
+      "attr-value1",  xtree_gtml_scan_attr_value, xtree_gtml_token_ATTR_VALUE,
+      "value1 />",
+      "value1",
+      " />",
+    },
+    {
+      "attr-value2",  xtree_gtml_scan_attr_value, xtree_gtml_token_ATTR_VALUE,
+      "value2/>",
+      "value2",
+      "/>",
+    },
+    {
+      "attr-value3",  xtree_gtml_scan_attr_value, xtree_gtml_token_ATTR_VALUE,
+      "'value\"3\"' />",
+      "value\"3\"",
+      " />",
+    },
+    {
+      "attr-value4",  xtree_gtml_scan_attr_value, xtree_gtml_token_ATTR_VALUE,
+      "\"value'4'\" />",
+      "value'4'",
+      " />",
+    },
+    {
+      "attr-value5",   xtree_gtml_scan_attr_value, xtree_gtml_token_ATTR_VALUE,
+      "v>",
+      "v",
+      ">",
+    },
+    {
+      "attr-value6",   xtree_gtml_scan_attr_value, xtree_gtml_token_ATTR_VALUE,
+      "\"a b\">",
+      "a b",
+      ">",
+    },
+    {
+      "attr-value7",   xtree_gtml_scan_attr_value, xtree_gtml_token_ATTR_VALUE,
+      "\"\">",
+      "",
+      ">",
+    },
+    {
+      "attr-value8",   xtree_gtml_scan_attr_value, xtree_gtml_token_ATTR_VALUE,
+      ">",
+      "",
+      ">",
+    },
+    {
+      "attr-value9",   xtree_gtml_scan_attr_value, xtree_gtml_token_ATTR_VALUE,
+      "/>",
+      "",
+      "/>",
+    },
+    {
+      "self-closing1",  xtree_gtml_scan_sclosing, xtree_gtml_token_SCLOSING,
+      "/>s",
+      "",
+      "s",
+    },
+    {
+      "self-closing2",  xtree_gtml_scan_sclosing, xtree_gtml_token_SCLOSING,
+      "   />s",
+      "",
+      "s",
+    },
+    {
+      "gt1",           xtree_gtml_scan_gt, xtree_gtml_token_GT,
+      "> ",
+      ">",
+      " ",
+    },
+    {
+      "gt2",           xtree_gtml_scan_gt, xtree_gtml_token_GT,
+      "  >",
+      ">",
+      "\xff",
+    },
+    {
+      "content1",      xtree_gtml_scan_content,    xtree_gtml_token_CONTENT,
+      " inner content < to be ignored",
+      " inner content ",
+      "< to be ignored",
+    },
+    {
+      "content2",      xtree_gtml_scan_content,    xtree_gtml_token_CONTENT,
+      " inner content &amp; to be ignored",
+      " inner content ",
+      "&amp; to be ignored",
+    },
+    {
+      "content3",   xtree_gtml_scan_content, xtree_gtml_token_CONTENT,
+      "text",
+      "text",
+      "\xff",
+    },
+    {
+      "content4",   xtree_gtml_scan_content, xtree_gtml_token_CONTENT,
+      "a > b\nc<",
+      "a > b\nc",
+      "<",
+    },
+    {
+      "ecode",        xtree_gtml_scan_ecode,      xtree_gtml_token_ECODE,
+      "&foo; s",
+      "foo",
+      " s",
+    },
+    {
+      "comment1",     xtree_gtml_scan_comment,    xtree_gtml_token_COMMENT,
+      "<!-- a comment --> extra content",
+      " a comment ",
+      " extra content",
+    },
+    {
+      "comment2",     xtree_gtml_scan_comment,    xtree_gtml_token_COMMENT,
+      "<!-- a comment --> --> extra content",
+      " a comment ",
+      " --> extra content",
+    },
+    {
+      "directive",    xtree_gtml_scan_directive,  xtree_gtml_token_DIRECTIVE,
+      "<? <some> <dir> goes <here> ?> s",
+      " <some> <dir> goes <here> ",
+      " s",
+    },
+  };
+  static const size_t ntests = sizeof tests / sizeof tests[0];
+
+  xtree_reader_t *reader = NULL;
+  struct xtree_errobj_t err = {};
+  xtree_scan_token_t *token = NULL;
 
   if (!(xtree_errobj_reset (&err, 1024))) {
     PERROR ("Failed to init the error object\n");
+    err.libcode = xtree_errcode_OOM;
     goto cleanup;
   }
 
-  if (!(reader = xtree_reader_str ("inline source", input))) {
-    PERROR ("Failed to create a reader for the string\n");
-    goto cleanup;
-  }
-
-  if (!(root_node = xtree_node_new (&err, NULL, U("root-node"), xtree_node_type_LIST))) {
-    PERROR ("OOM creating root node\n");
-    goto cleanup;
-  }
-
-  size_t nchild = 0;
-  while ((tmp = xtree_gtml_parse (&err, reader, 1024)) != NULL) {
-    if (!(xtree_node_child_append (&err, root_node, tmp))) {
-      xtree_node_free (&tmp);
-      PERROR ("Failed to attach child %zu to root_node\n", nchild);
+  for (size_t i=0; i < ntests; i++) {
+    // Setup a reader for input
+    xtree_reader_free (&reader);
+    if (!(reader = xtree_reader_str ("inline source", U(tests[i].input)))) {
+      PERROR ("Failed to create a reader for the string\n");
+      ERROR ((&err), xtree_errcode_OOM,
+             "[%s]: Failed to init reader", tests[i].name);
+      goto cleanup;
     }
-    nchild++;
+
+    // Scan the next expected token, then compare it
+    xtree_scan_token_free (&token);
+    if (!(token = tests[i].fptr (&err, reader))) {
+      PERROR ("[%s]: Failed to scan\n", tests[i].name);
+      goto cleanup;
+    }
+    int got_id = xtree_scan_token_id (token);
+    const unsigned char *got_text = xtree_scan_token_text (token);
+
+    const char *msg = NULL;
+    if ((strcmp ((char *)got_text, tests[i].output)) != 0) {
+      msg = "Wrong text";
+    }
+    if (got_id != tests[i].id) {
+      msg = "Wrong ID";
+    }
+    if (msg) {
+      PERROR ("test [%s]: error\nExpected `%s`: `%s`\nGot `%s`: `%s`\n",
+              tests[i].name,
+              xtree_gtml_token_id_str (tests[i].id),
+              tests[i].output,
+              xtree_gtml_token_id_str (got_id),
+              got_text);
+      goto cleanup;
+    }
+
+    // Ensure we have the correct remaining characters in the reader
+    if ((xtree_reader_peek (reader)) != tests[i].remaining[0]) {
+      PERROR ("test [%s]: expected `%c` 0x%02x remaining, got `%c`  0x%02x instead\n",
+              tests[i].name,
+              tests[i].remaining[0], tests[i].remaining[0],
+              xtree_reader_peek (reader), xtree_reader_peek (reader));
+      goto cleanup;
+    }
   }
+
   ret = EXIT_SUCCESS;
 
 cleanup:
   xtree_reader_free (&reader);
-  dumperr (&err);
+  if ((dumperr (&err)) != 0)
+    ret = EXIT_FAILURE;
   xtree_errobj_reset (&err, 0);
-  xtree_node_free (&root_node);
-  free (input);
+  xtree_scan_token_free (&token);
   return ret;
 }
 
@@ -173,7 +385,7 @@ int main (int argc, char **argv)
   } tests[] = {
 
     /* Tests for xtree_gtml_scan() */
-    TEST (test_gtml_basic),
+    TEST (test_gtml_scan_happy),
   };
 #undef TEST
 
@@ -200,7 +412,7 @@ int main (int argc, char **argv)
   printf ("testing xtree_gtml library\n");
   for (size_t i=0; i<ntests; i++) {
     if (tests[i].selected) {
-      printf ("[%50s]: ", tests[i].name);
+      printf ("[%30s]: ", tests[i].name);
       fflush (stdout);
       int rc = tests[i].fptr ();
       printf ("%10s\n", rc ? "failed" : "passed");

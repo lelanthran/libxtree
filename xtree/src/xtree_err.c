@@ -25,6 +25,9 @@ const char *xtree_errcode_str (enum xtree_errcode_t code)
     ERRCODE (xtree_errcode_NULL_PARAMETER),
     ERRCODE (xtree_errcode_UNEXPECTED_TOKEN),
     ERRCODE (xtree_errcode_DEPTH_EXCEEDED),
+    ERRCODE (xtree_errcode_UNIMPLEMENTED),
+    ERRCODE (xtree_errcode_UNTERMINATED_STRING),
+    ERRCODE (xtree_errcode_UNTERMINATED_ECODE),
   };
   static const size_t nerrcodes = sizeof errcodes / sizeof errcodes[0];
 #undef ERRCODE
@@ -37,6 +40,11 @@ const char *xtree_errcode_str (enum xtree_errcode_t code)
   static char unknown[64];
   snprintf (unknown, sizeof unknown, "%i: unknown code", code);
   return unknown;
+}
+
+bool xtree_errchk (struct xtree_errobj_t const *err)
+{
+  return err->libcode || err->syscode ? true : false;
 }
 
 bool xtree_errobj_reset (struct xtree_errobj_t *err, size_t msglen)

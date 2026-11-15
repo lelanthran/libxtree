@@ -15,6 +15,9 @@ enum xtree_errcode_t {
   xtree_errcode_NULL_PARAMETER,
   xtree_errcode_UNEXPECTED_TOKEN,
   xtree_errcode_DEPTH_EXCEEDED,
+  xtree_errcode_UNIMPLEMENTED,
+  xtree_errcode_UNTERMINATED_STRING,
+  xtree_errcode_UNTERMINATED_ECODE,
 };
 
 struct xtree_errobj_t {
@@ -50,6 +53,10 @@ extern "C" {
 
   // Turn an errorcode into a string
   const char *xtree_errcode_str (enum xtree_errcode_t code);
+
+  // Return true if the error object has any error flags set, else return false.
+  bool xtree_errchk (struct xtree_errobj_t const *err);
+
 
   // Reset the message buffer to the specified size. Use `0` to free it
   // completely. NOTE: This just resizes (or frees) the message buffer. Use

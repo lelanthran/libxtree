@@ -5,10 +5,10 @@
 /* ************************************************************************
  * General Text Markup Language (GTML) — a relaxed form of HTML.
  *
- * This file specifies the grammar only: how input is scanned into tokens
- * and how those tokens are assembled into a tree. Processing semantics
- * (script/style inclusion, entity expansion, etc.) are defined downstream
- * of this spec and are out of scope here.
+ * This file specifies the grammar only: input is scanned into tokens and how
+ * those tokens are parsed into a tree. This is the scanner spec only.
+ * Processing semantics (script/style inclusion, entity expansion, etc.) are
+ * defined downstream of this spec and are out of scope here.
  *
  *
  * =====================================================================
@@ -44,218 +44,142 @@
  * 2. SCANNER RULES
  * =====================================================================
  *
- * The scanner consumes input and emits a token stream. The parser
- * consumes the token stream (section 3). A well-formed input yields
- * a well-formed token stream; the scanner does not know about grammar
- * positions.
+ * --Token scanning rules--
  *
- * --- Whitespace ---
+ * Tokens are scanned using the following rules. Unless otherwise stated,
+ * delimiters are excluded from the token text.
  *
- * Whitespace is any of: space, \t, \n, \v, \f, \r  (i.e. the set
- * matched by isspace() in the C locale).
+ * WSPACE:
+ *    One or more characters from " \r\n\t\f".
+ *    Consecutive whitespace characters are returned as a single token.
  *
- * --- Identifiers ---
+ * CDATA:
+ *    <![CDATA[...]]>
+ *    The token contains the text between the opening and closing delimiters.
  *
- * Tag names, attribute names, and unquoted attribute values, other than
- * unquoted numbers, are identifiers.
+ * TAGNAME:
+ *    Starts with `<`.
+ *    The opening `<` is consumed and excluded from the token.
+ *    The token contains all subsequent characters up to, but not
+ *    including, the first whitespace character.
+ *    The terminating whitespace character is consumed.
+ *    The scanner does not require `>` to terminate the tag name.
  *
- *     start:  [A-Za-z]
- *     body:   [A-Za-z0-9_:.+-]
+ * CLOSE_TAG
+ *    The closing tag name, beginning after `</` and ending at the
+ *    first `>` or whitespace character.
+ *    The opening `</` and terminating character are consumed.
+ *    Delimiters are excluded from the token text.
  *
- * Scanning an identifier ends at the first character outside the body
- * set, including whitespace, '=', '/', '>', '&', '<', quotes, etc.
- * The terminating character is not consumed by the identifier scan
- * (the scanner will attempt to produce the next token from it).
+ * ATTR_NAME:
+ *    Leading whitespace is consumed and discarded.
+ *    The token contains all subsequent characters up to, but not
+ *    including, the first `=` or whitespace character.
+ *    The terminating character is consumed.
+ *    An attribute name may be followed by whitespace, `=`, or both.
  *
- * > NOTE: attribute values can be either quoted strings, unquoted
- * >       identifiers or numbers.
+ * ATTR_VALUE:
+ *    If the first character is a single or double quote, that character
+ *    is consumed and used as the terminating delimiter.
+ *    The token contains all subsequent characters up to, but not
+ *    including, the matching closing quote.
+ *    The closing quote is consumed.
+ *    Otherwise, the token contains all characters up to, but not
+ *    including, the first whitespace character.
+ *    The terminating whitespace character is consumed.
  *
- * All identifiers are UPPER-CASED on storage — including identifiers
- * appearing as unquoted attribute values. To preserve case in an
- * attribute value, the author must quote it.
+ * CONTENT:
+ *    The token contains all characters up to, but not including, the first
+ *    `<` or `&` character.
+ *    The terminating character is consumed.
  *
- * > NOTE: The CDATA identifier, explained in below, is only recognised
- * >       when uppercased in the input.
+ *    Content may contain whitespace and arbitrary characters other than
+ *    the terminating delimiters.
  *
- * --- Escapes / entities ---
+ * ECODE:
+ *    &...;
+ *    The opening `&` is consumed.
+ *    The token contains the text between `&` and `;`.
+ *    The terminating `;` is consumed.
+ * COMMENT:
+ *     <!--...-->
+ *     The token contains the text between the opening and closing delimiters.
  *
- * The scanner recognizes three escape shapes:
+ * DIRECTIVE:
+ *     <?...?>
+ *     The token contains the text between the opening and closing delimiters.
  *
- *     &<identifier>;  identifier is one of a fixed named set (specified
- *                     separately)
- *     &#DDDD;         one or more decimal digits, unlimited
- *     &#xHHHH;        one or more hex digits, unlimited
+ * --General scanning behaviour--
  *
- * On match, the scanner emits { ESCAPED_TEXT, <payload> } where the
- * payload is the name or the numeric string.
- *
- * > NOTE: Even though unlimited digits may appear in the escape code, the
- * >       processor may have limits on number size or bit-width magnitude.
- *
- * If '&' is not followed by a well-formed escape shape, the scanner
- * emits { ESCAPED_TEXT, "" }.
- *
- * --- Comments ---
- *
- *     opener:     <#
- *     terminator: #>
- *
- * Comment body is any sequence of characters not containing the
- * terminator "#>". Comments do not nest.
- *
- * The scanner emits a { COMMENT, "..." } token.
- *
- * --- CDATA ---
- *
- *     opener:     <![CDATA[
- *     terminator: ]]>
- *
- * CDATA content is literal character data: no tag scanning, no entity
- * scanning, no comment scanning. The terminator may not appear inside
- * the content. CDATA does not nest.
- *
- * CDATA is allowed only in text content positions (element children
- * and document level). It is not allowed inside tags (attribute
- * position) and not inside comments.
- *
- * CDATA content is preserved verbatim — whitespace is not coalesced
- * inside CDATA.
- *
- * --- Directives ---
- *
- *     <? ... ?>
- *
- * A directive is literal text ending at the first "?>". Content
- * between is not scanned for tags, entities, comments, or CDATA. A
- * directive is allowed everywhere a tag is allowed.
- *
- * Exact directives and their semantics are specified separately.
+ * - The scanner operates on the input one character at a time.
+ * - The opening and closing delimiters of a delimited section are consumed.
+ * - Delimiters are excluded from the token text.
+ * - A delimiter-based token may contain an empty string.
+ * - The scanner does not perform entity expansion, escape processing,
+ *   attribute interpretation, or other semantic processing.
+ * - Whitespace is recognized only as the characters listed under WSPACE.
+ * - Characters not explicitly recognized as delimiters are accepted as
+ *   ordinary token content.
  *
  *
- * --- DOCTYPE (ignored) ---
+ * --Forbidden--
  *
- * The literal sequences <!doctype gtml> and <!doctype gtml/> appearing
- * at the top level are ignored by the scanner (produce no tokens).
- * No other DOCTYPE form is recognized.
- * If present, the `<!doctype>` node must be specified on the first
- * line of the input, appearing in full on that line.
+ * Any input that cannot be scanned using the rules above will result in an
+ * error. Examples include:
  *
- * --- Forbidden ---
+ * - A missing closing delimiter for CDATA, COMMENT, or DIRECTIVE.
+ * - A missing `;` terminating an ECODE.
+ * - An unterminated TAGNAME, ATTR_NAME, ATTR_VALUE, or CONTENT token.
+ * - An opening delimiter that does not match the expected delimiter.
  *
- * A bare '<' that does not begin one of the above constructs is a
- * scanner error.
+ * The scanner does not validate the resulting markup structure. Nesting,
+ * matching tags, and attribute syntax are the responsibility of the parser.
  *
- *
- * =====================================================================
- * 3. PARSER RULES
- * =====================================================================
- *
- * The parser consumes the token stream and produces a tree. Errors
- * in this section are parse errors; they are distinct from scanner
- * errors but both are fatal to the parse.
- *
- * --- Identifiers and attribute values ---
- *
- *   - No whitespace is allowed around '='. A whitespace between an
- *     identifier and '=' terminates the identifier; the '=' then
- *     begins the next token and is a parse error in that position.
- *
- *   - Unquoted attribute values end at whitespace or '>'. Because
- *     an unquoted value is an identifier token, '=' is outside the
- *     identifier body and therefore ends it; a subsequent '=' is
- *     a parse error at the attribute-position grammar rule.
- *
- *   - Quoted values ('...' or "...") preserve all characters
- *     verbatim, including whitespace, newlines, and case. Entities
- *     inside quoted values are scanned as ESCAPED_TEXT tokens.
- *
- *   - Duplicate attribute names are permitted and stored in the
- *     order encountered.
- *
- * --- Whitespace coalescing ---
- *
- *   Runs of whitespace are coalesced into a single space in text
- *   content, in attribute positions, and at document level. Whitespace
- *   inside CDATA and inside quoted attribute values is preserved
- *   verbatim and is never coalesced.
- *
- *   Whitespace at the document level (i.e. between nodes at that level)
-  *  is ignored.
- *
- * --- Structure ---
- *
- *   - Multiple top-level elements are permitted.
- *   - Every non-self-closing tag must be closed before its parent
- *     is closed, and before EOF.
- *   - A close tag must match the innermost open tag (case-insensitive,
- *     since identifiers are upper-cased on storage).
- *   - Stray or mismatched close tags are parse errors.
- *   - A DOCTYPE-ignore sequence (<!doctype gtml> or <!doctype gtml/>)
- *     is permitted only at document level, and produces no node.
- *
- * --- Comments and directives in the grammar ---
- *
- *   - Comments are permitted as element children and at document
- *     level. They are forbidden inside a tag (attribute position).
- *
- *   - Directives are permitted wherever normal tags are permitted.
- *     They are ignored inside CDATA and inside comments (those are
-       literal contexts).
- *
- * --- Errors ---
- *
- *   Every token that is syntactically valid but appears in a grammar
- *   position where it is not permitted is a parse error. Parse errors
- *   and scanner errors are both fatal to the parse; no recovery is
- *   attempted.
- *
- *
- * =====================================================================
- * 4. TREE CONSTRUCTION
- * =====================================================================
- * TBD. For now, it is sufficient to state that all tags, including
- * directives, CDATA, comments, etc are stored as nodes in the resulting
- * tree.
  */
 
-  enum xtree_gtml_token_id_t {
-    xtree_gtml_token_RESERVED   = -2, // Reserved for internal use
-    xtree_gtml_token_ERROR      = -1, // Error in scanner
-    xtree_gtml_token_EOF        = 0,  // End of input
-    xtree_gtml_token_LBRACE,          // {
-    xtree_gtml_token_RBRACE,          // }
-    xtree_gtml_token_LBRACKET,        // [
-    xtree_gtml_token_RBRACKET,        // ]
-    xtree_gtml_token_COLON,           // :
-    xtree_gtml_token_COMMA,           // ,
-    xtree_gtml_token_STRING,          // "..." (quotes removed, escapes as-is)
-    xtree_gtml_token_NUMBER,          // -12.5e+3, .5, +1, 0x1F, 017, 0b101
-    xtree_gtml_token_TRUE,            // true
-    xtree_gtml_token_FALSE,           // false
-    xtree_gtml_token_NULL,            // null
-    xtree_gtml_token_COMMENT,         // // to end of line
-    xtree_gtml_token_SYMBOL,          // any other unquoted word
-    xtree_gtml_token_INFINITY,        // Infinity, +Infinity
-    xtree_gtml_token_NEG_INFINITY,    // -Infinity
-    xtree_gtml_token_NAN,             // NaN, +NaN
-    xtree_gtml_token_NEG_NAN,         // -NaN
-    xtree_gtml_token_UNDEFINED,       // undefined
-    xtree_gtml_token_UNRECOGNISED,    // Unknown tokens
-  };
+enum xtree_gtml_token_id_t {
+  xtree_gtml_token_SENTINEL     = XTREE_SCAN_TOKEN_SENTINEL,
+  xtree_gtml_token_UNRECOGNISED = XTREE_SCAN_TOKEN_UNRECOGNISED,
+  xtree_gtml_token_ERROR        = XTREE_SCAN_TOKEN_ERROR,
+  xtree_gtml_token_EOF          = XTREE_SCAN_TOKEN_EOF,
 
+  xtree_gtml_token_WSPACE,        // " \t\r\n\f"
+  xtree_gtml_token_EQUAL,         // =
+  xtree_gtml_token_GT,            // >
+  xtree_gtml_token_SCLOSING,      // />
+  xtree_gtml_token_CDATA,         // <![CDATA[...]]>
+  xtree_gtml_token_TAGNAME,       // self-explanatory
+  xtree_gtml_token_CLOSE_TAG,     // self-explanatory
+  xtree_gtml_token_ATTR_NAME,     // self-explanatory
+  xtree_gtml_token_ATTR_VALUE,    // self-explanatory
+  xtree_gtml_token_CONTENT,       // self-explanatory
+  xtree_gtml_token_ECODE,         // self-explanatory
+  xtree_gtml_token_COMMENT,       // <!-- body -->
+  xtree_gtml_token_DIRECTIVE,     // <? body ?>
+};
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-  // Returns the next TML token found in the supplied reader_t object.
-  // Whitespace between tokens is skipped. At the end of the input an
-  // xtree_gtml_token_EOF token is returned (repeatedly, if called again).
-  // On an unterminated string an xtree_gtml_token_ERROR token is returned.
-  xtree_scan_token_t *xtree_gtml_scan (xtree_reader_t *reader);
-
   // Get a string representation of the token id.
   const char *xtree_gtml_token_id_str (enum xtree_gtml_token_id_t id);
+
+  // Scanning functions; use `xtree_scan_token_free()` to free the returned
+  // values.
+  xtree_scan_token_t *xtree_gtml_scan_wspace (struct xtree_errobj_t *err, xtree_reader_t *reader);
+  xtree_scan_token_t *xtree_gtml_scan_equal (struct xtree_errobj_t *err, xtree_reader_t *reader);
+  xtree_scan_token_t *xtree_gtml_scan_gt (struct xtree_errobj_t *err, xtree_reader_t *reader);
+  xtree_scan_token_t *xtree_gtml_scan_cdata (struct xtree_errobj_t *err, xtree_reader_t *reader);
+  xtree_scan_token_t *xtree_gtml_scan_tagname (struct xtree_errobj_t *err, xtree_reader_t *reader);
+  xtree_scan_token_t *xtree_gtml_scan_close_tag (struct xtree_errobj_t *err, xtree_reader_t *reader);
+  xtree_scan_token_t *xtree_gtml_scan_sclosing (struct xtree_errobj_t *err, xtree_reader_t *reader);
+  xtree_scan_token_t *xtree_gtml_scan_attr_name (struct xtree_errobj_t *err, xtree_reader_t *reader);
+  xtree_scan_token_t *xtree_gtml_scan_attr_value (struct xtree_errobj_t *err, xtree_reader_t *reader);
+  xtree_scan_token_t *xtree_gtml_scan_content (struct xtree_errobj_t *err, xtree_reader_t *reader);
+  xtree_scan_token_t *xtree_gtml_scan_ecode (struct xtree_errobj_t *err, xtree_reader_t *reader);
+  xtree_scan_token_t *xtree_gtml_scan_comment (struct xtree_errobj_t *err, xtree_reader_t *reader);
+  xtree_scan_token_t *xtree_gtml_scan_directive (struct xtree_errobj_t *err, xtree_reader_t *reader);
 
 #ifdef __cplusplus
 };
