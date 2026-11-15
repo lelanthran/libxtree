@@ -17,7 +17,8 @@ typedef xtree_scan_token_t *(xtree_scan_fptr_t) (xtree_reader_t *reader);
 
 #define XTREE_SCAN_TOKEN_EOF          (0)
 #define XTREE_SCAN_TOKEN_ERROR        (-1)
-#define XTREE_SCAN_TOKEN_SENTINEL     (-2)
+#define XTREE_SCAN_TOKEN_UNRECOGNISED (-2)
+#define XTREE_SCAN_TOKEN_SENTINEL     (-3)
 
 
 #ifdef __cplusplus

@@ -27,6 +27,7 @@ extern "C" {
   bool xtree_reader_eof (const xtree_reader_t *reader);
   size_t xtree_reader_line (const xtree_reader_t *reader);
   size_t xtree_reader_cpos (const xtree_reader_t *reader);
+  const char *xtree_reader_snippet (xtree_reader_t *reader, size_t len);
 
   // Get the next character (advancing the position of the reader), unget the
   // next character (maintaining the correct line number and character
@@ -39,6 +40,13 @@ extern "C" {
   void xtree_reader_unget (xtree_reader_t *reader);
   int xtree_reader_peek (xtree_reader_t *reader);
 
+  // Retrieve the next `dstlen - 1` characters. If fewer than `dstlen - 1`
+  // characters remain the returned string will have contain all the remaining
+  // characters. The caller must ensure that `dst` is large enough to contain
+  // `dstlen` bytes. The returned string is *always* nul-terminated.
+  void xtree_reader_lookahead (xtree_reader_t *reader,
+                               unsigned char *dst,
+                               size_t dstlen);
 
 #ifdef __cplusplus
 };

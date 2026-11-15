@@ -64,6 +64,8 @@ struct xtree_reader_t {
   bool can_unget;
   struct xtree_errobj_t err;
 
+  // Useful for providing limited snippets where scanning may fail
+  char *snippet;
 };
 
 static xtree_reader_t *xtree_reader_new (const char *name, unsigned char *input)
@@ -97,6 +99,7 @@ void xtree_reader_free (xtree_reader_t **reader)
   xtree_reader_t *r = *reader;
   free (r->name);
   free (r->input);
+  free (r->snippet);
 
   xtree_errobj_reset (&r->err, 0);
   free (r);
@@ -154,6 +157,21 @@ size_t xtree_reader_cpos (const xtree_reader_t *reader)
   return cpos;
 }
 
+const char *xtree_reader_snippet (xtree_reader_t *reader, size_t len)
+{
+  if (!reader || !reader->input)
+    return NULL;
+
+  free (reader->snippet);
+
+  if (!(reader->snippet = malloc (len + 1)))
+    return NULL;
+
+  strncpy (reader->snippet, (char *)&reader->input[reader->input_idx], len);
+  reader->snippet[len] = 0;
+  return reader->snippet;
+}
+
 int xtree_reader_get (xtree_reader_t *reader)
 {
   if (!reader || reader->input_idx >= reader->input_len ||
@@ -181,3 +199,29 @@ int xtree_reader_peek (xtree_reader_t *reader)
     ret = EOF;
   return ret;
 }
+
+void xtree_reader_lookahead (xtree_reader_t *reader,
+                             unsigned char *dst,
+                             size_t dstlen)
+{
+  if (!dst)
+    return;
+
+  size_t nbytes = reader->input_len - reader->input_idx;
+
+  if (!nbytes)
+    return;
+
+  if (dstlen < nbytes)
+    nbytes = dstlen;
+
+  if (!nbytes)
+      return;
+
+  nbytes--;
+  unsigned char *src = &reader->input[reader->input_idx];
+  strncpy ((char *)dst, (char *)src, nbytes);
+  dst[nbytes - 1] = 0;
+}
+
+

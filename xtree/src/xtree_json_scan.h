@@ -31,9 +31,10 @@
   // EOF and ERROR tokens have an empty string as their text.
 
   enum xtree_json_token_id_t {
-    xtree_json_token_SENTINEL   = -2, // Reserved for internal use
-    xtree_json_token_ERROR      = -1, // Error in scanner
-    xtree_json_token_EOF        = 0,  // End of input
+    xtree_json_token_SENTINEL     = XTREE_SCAN_TOKEN_SENTINEL,
+    xtree_json_token_UNRECOGNISED = XTREE_SCAN_TOKEN_UNRECOGNISED,
+    xtree_json_token_ERROR        = XTREE_SCAN_TOKEN_ERROR,
+    xtree_json_token_EOF          = XTREE_SCAN_TOKEN_EOF,
     xtree_json_token_LBRACE,          // {
     xtree_json_token_RBRACE,          // }
     xtree_json_token_LBRACKET,        // [
@@ -52,7 +53,6 @@
     xtree_json_token_NAN,             // NaN, +NaN
     xtree_json_token_NEG_NAN,         // -NaN
     xtree_json_token_UNDEFINED,       // undefined
-    xtree_json_token_UNRECOGNISED,    // Unknown tokens
   };
 
 

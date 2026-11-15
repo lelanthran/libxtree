@@ -13,6 +13,7 @@ extern "C" {
 #endif
 
   xtree_node_t *xtree_gtml_parse (struct xtree_errobj_t *err,
+                                  xtree_node_t *parent,
                                   xtree_reader_t *reader,
                                   size_t max_depth);
 
